@@ -116,6 +116,21 @@ CREATE TABLE IF NOT EXISTS resolved_findings (
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
 CREATE INDEX IF NOT EXISTS idx_findings_cve  ON findings(cve_id);
 CREATE INDEX IF NOT EXISTS idx_hosts_scan    ON hosts(scan_id);
+
+-- Per-(host, cve, port) lineage across scans: when it was first/last seen,
+-- when it was resolved (if ever), and whether it came back after resolution.
+-- Not yet populated or read anywhere; a later step wires that up.
+CREATE TABLE IF NOT EXISTS finding_lifecycle (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_key    TEXT NOT NULL,
+    cve_id      TEXT NOT NULL,
+    port        INTEGER,
+    first_seen  REAL,
+    last_seen   REAL,
+    resolved_at REAL,
+    recurred    INTEGER DEFAULT 0,
+    UNIQUE(host_key, cve_id, port)
+);
 """
 
 

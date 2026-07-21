@@ -16,3 +16,6 @@ python-nmap>=0.7.1
 # `credentialed: true` in config. SSH uses paramiko; Windows/WinRM uses pywinrm.
 paramiko>=3.0
 pywinrm>=0.4.3
+
+# Dev/test
+pytest>=7.0
