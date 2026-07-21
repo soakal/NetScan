@@ -185,6 +185,10 @@ Keys can also come from the environment: `NETSCAN_NVD_API_KEY`,
 
 ## Run
 
+**Windows:** double-click `run.bat` for a menu (scan / serve / demo /
+profiles) instead of typing commands — see [RUNNING.md](RUNNING.md) for
+details. Everything below also works from a terminal on any platform.
+
 ```bash
 # 1) scan (root/sudo recommended so nmap can do SYN + OS detection)
 sudo python run.py scan -c config.yaml
