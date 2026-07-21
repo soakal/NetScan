@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% set active = 'scans' %}
+{% block title %}NetScan — Scans{% endblock %}
+{% block body %}
+<h1>Scan history</h1>
+<p class="sub">Each scan is a point-in-time snapshot. Findings are diffed between
+  consecutive scans to verify remediation.</p>
+<div class="panel"><table>
+ <thead><tr><th>#</th><th>Finished</th><th>Profile</th><th>Targets</th><th>Devices</th><th>Findings</th></tr></thead>
+ <tbody>
+ {% for s in scans %}
+  <tr>
+   <td class="mono-cell"><a href="/?scan={{ s.id }}">#{{ s.id }}</a></td>
+   <td style="color:var(--muted)">{{ s.finished_at|ts }}</td>
+   <td><span class="pill">{{ s.profile }}</span></td>
+   <td class="mono-cell" style="color:var(--muted)">{{ s.targets|fromjson|join(', ') }}</td>
+   <td class="mono-cell">{{ s.host_count }}</td>
+   <td class="mono-cell">{{ s.finding_count }}</td>
+  </tr>
+ {% else %}<tr><td colspan="6" class="empty">No scans yet. Run <code>python run.py scan</code>.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+{% endblock %}

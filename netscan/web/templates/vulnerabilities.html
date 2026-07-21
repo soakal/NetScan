@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active = 'vulns' %}
+{% block title %}NetScan — Vulnerabilities{% endblock %}
+{% block scanpick %}
+<div class="scan-pick">scan
+<select onchange="location.href='/vulnerabilities?scan='+this.value">
+  {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if s.id==scan_id }}>#{{ s.id }} · {{ s.finished_at|ts }}</option>{% endfor %}
+</select></div>
+{% endblock %}
+{% block body %}
+<h1>Vulnerabilities</h1>
+<p class="sub">{{ cves|length }} unique CVE(s) · ranked by blended priority (CVSS + EPSS + KEV)</p>
+<div class="panel"><table>
+ <thead><tr><th>Priority</th><th>CVE</th><th>Severity</th><th>EPSS</th>
+   <th>OWASP family</th><th>Hosts</th></tr></thead>
+ <tbody>
+ {% for c in cves %}
+  <tr>
+   <td class="mono-cell" style="font-weight:600">{{ c.priority|round(0)|int }}</td>
+   <td><a href="/vuln/{{ c.cve_id }}" class="mono-cell">{{ c.cve_id }}</a>
+      {% if c.is_kev %} <span class="badge kev-badge">KEV</span>{% endif %}
+      {% if c.ransomware %} <span class="badge sev-Critical">ransomware</span>{% endif %}</td>
+   <td><span class="badge sev-{{ c.severity }}">{{ c.severity }}{% if c.cvss %} {{ c.cvss }}{% endif %}</span></td>
+   <td class="mono-cell" title="percentile {{ c.epss_pct|pct }}">{{ c.epss|pct }}</td>
+   <td style="color:var(--muted);font-size:12px">{{ c.owasp_name or '—' }}</td>
+   <td class="mono-cell">{{ c.host_count }}</td>
+  </tr>
+ {% else %}<tr><td colspan="6" class="empty">No vulnerabilities in this scan.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+{% endblock %}

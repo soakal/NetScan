@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block title %}NetScan — Dashboard{% endblock %}
+
+{% block scanpick %}
+<div class="scan-pick">scan
+<select onchange="location.href='/?scan='+this.value">
+  {% for s in scans %}
+  <option value="{{ s.id }}" {{ 'selected' if s.id==scan_id }}>#{{ s.id }} · {{ s.finished_at|ts }}</option>
+  {% endfor %}
+</select></div>
+{% endblock %}
+
+{% block body %}
+<h1>Network risk overview</h1>
+<p class="sub">Scan #{{ scan.id }} · profile <span class="pill">{{ scan.profile }}</span> ·
+  {{ scan.finished_at|ts }} · targets {{ scan.targets|fromjson|join(', ') }}</p>
+
+<div class="grid cards">
+  <div class="card"><div class="stat">{{ summary.hosts }}</div><div class="label">Live devices</div></div>
+  <div class="card"><div class="stat">{{ summary.total }}</div><div class="label">Open findings</div></div>
+  <div class="card kev"><div class="stat">{{ summary.kev }}</div><div class="label">KEV · exploited</div></div>
+  <div class="card ok"><div class="stat">{{ summary.resolved }}</div><div class="label">Resolved since last</div></div>
+</div>
+
+<h2>Severity breakdown</h2>
+<div class="grid cards">
+  <div class="card"><div class="stat small sev-text" style="color:var(--crit)">{{ summary.critical }}</div><div class="label">Critical</div></div>
+  <div class="card"><div class="stat small" style="color:var(--high)">{{ summary.high }}</div><div class="label">High</div></div>
+  <div class="card"><div class="stat small" style="color:var(--med)">{{ summary.medium }}</div><div class="label">Medium</div></div>
+  <div class="card"><div class="stat small" style="color:var(--low)">{{ summary.low }}</div><div class="label">Low</div></div>
+</div>
+
+<div class="two-col">
+ <div>
+  <h2>Highest-risk devices</h2>
+  <div class="panel"><table>
+   <thead><tr><th>Device</th><th>OS</th><th>Risk</th></tr></thead>
+   <tbody>
+   {% for h in top_hosts %}
+    <tr>
+     <td><a href="/device/{{ h.id }}" class="mono-cell">{{ h.ip }}</a>
+        {% if h.hostname %}<div style="color:var(--muted);font-size:12px">{{ h.hostname }}</div>{% endif %}</td>
+     <td style="color:var(--muted)">{{ h.os_name or '—' }}</td>
+     <td><span class="mono-cell">{{ h.risk_score }}</span>
+        <div class="risk-bar"><i style="width:{{ [h.risk_score,100]|min }}%"></i></div></td>
+    </tr>
+   {% else %}<tr><td colspan="3" style="color:var(--muted)">No devices.</td></tr>{% endfor %}
+   </tbody>
+  </table></div>
+ </div>
+ <div>
+  <h2>Top vulnerabilities</h2>
+  <div class="panel"><table>
+   <thead><tr><th>CVE</th><th>Sev</th><th>EPSS</th><th>Hosts</th></tr></thead>
+   <tbody>
+   {% for c in top_cves %}
+    <tr>
+     <td><a href="/vuln/{{ c.cve_id }}" class="mono-cell">{{ c.cve_id }}</a>
+        {% if c.is_kev %} <span class="badge kev-badge">KEV</span>{% endif %}</td>
+     <td><span class="badge sev-{{ c.severity }}">{{ c.severity }}{% if c.cvss %} {{ c.cvss }}{% endif %}</span></td>
+     <td class="mono-cell" title="exploit probability (30d)">{{ c.epss|pct }}</td>
+     <td class="mono-cell">{{ c.host_count }}</td>
+    </tr>
+   {% else %}<tr><td colspan="4" style="color:var(--muted)">No findings.</td></tr>{% endfor %}
+   </tbody>
+  </table></div>
+ </div>
+</div>
+
+{% if resolved %}
+<h2>Resolved since previous scan ✓</h2>
+<div class="panel"><table>
+ <thead><tr><th>CVE</th><th>Device</th><th>Severity</th></tr></thead>
+ <tbody>
+ {% for r in resolved %}
+  <tr>
+   <td class="mono-cell">{{ r.cve_id }}{% if r.is_kev %} <span class="badge kev-badge">KEV</span>{% endif %}</td>
+   <td class="mono-cell">{{ r.ip or r.host_key }}</td>
+   <td><span class="badge status-RESOLVED">resolved</span></td>
+  </tr>
+ {% endfor %}
+ </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

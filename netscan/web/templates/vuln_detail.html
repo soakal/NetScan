@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set active = 'vulns' %}
+{% block title %}NetScan — {{ cve_id }}{% endblock %}
+{% block body %}
+<div class="crumb"><a href="/vulnerabilities">vulnerabilities</a> / {{ cve_id }}</div>
+<h1>{{ cve_id }}
+  {% if first.is_kev %}<span class="badge kev-badge">KEV</span>{% endif %}
+  {% if first.ransomware %}<span class="badge sev-Critical">ransomware</span>{% endif %}
+</h1>
+
+<div class="grid cards">
+  <div class="card"><div class="stat small"><span class="badge sev-{{ first.severity }}">{{ first.severity }}</span></div><div class="label">Severity</div></div>
+  <div class="card"><div class="stat small">{{ first.cvss or '—' }}</div><div class="label">CVSS base</div></div>
+  <div class="card"><div class="stat small">{{ first.epss|pct }}</div><div class="label">EPSS (30-day exploit prob.)</div></div>
+  <div class="card"><div class="stat small">{{ rows|length }}</div><div class="label">Affected devices</div></div>
+</div>
+
+<h2>Classification</h2>
+<div class="panel" style="padding:16px 18px"><dl class="kv">
+  <dt>Weakness (CWE)</dt><dd>{{ first.cwe_name or '—' }}{% if first.cwe %} <span class="mono-cell">({{ first.cwe }})</span>{% endif %}</dd>
+  <dt>OWASP 2025 family</dt><dd>{{ first.owasp_name or '—' }}</dd>
+  <dt>Detection source</dt><dd>{{ first.source or 'network' }}{% if first.source == 'oval' %} (distro OVAL feed){% elif first.source == 'msrc' %} (Microsoft MSRC){% elif first.source in ('ssh','winrm') %} (credentialed){% endif %}</dd>
+  <dt>EPSS percentile</dt><dd class="mono-cell">{{ first.epss_pct|pct }}</dd>
+  <dt>Affected product</dt><dd class="mono-cell">{{ first.product or first.service or '—' }} {{ first.version or '' }}</dd>
+</dl></div>
+
+{% if first.summary %}
+<h2>Description</h2>
+<div class="panel" style="padding:16px 18px;color:var(--muted)">{{ first.summary }}</div>
+{% endif %}
+
+<h2>Remediation</h2>
+<div class="panel" style="padding:6px 18px">
+  <ol class="steps">
+  {% for step in first.remediation|fromjson %}<li>{{ step }}</li>{% endfor %}
+  </ol>
+</div>
+
+<h2>Affected devices ({{ rows|length }})</h2>
+<div class="panel"><table>
+ <thead><tr><th>Device</th><th>Port / service</th><th>Detected version</th><th>Status</th></tr></thead>
+ <tbody>
+ {% for r in rows %}
+  <tr>
+   <td><a href="/device/{{ r.host_id }}" class="mono-cell">{{ r.ip }}</a>
+      {% if r.hostname %}<div style="color:var(--muted);font-size:12px">{{ r.hostname }}</div>{% endif %}</td>
+   <td class="mono-cell">{{ r.port }}/{{ r.service or 'tcp' }}</td>
+   <td class="mono-cell" style="color:var(--muted)">{{ r.product or '' }} {{ r.version or '' }}</td>
+   <td><span class="badge status-{{ r.status }}">{{ r.status|lower }}</span></td>
+  </tr>
+ {% endfor %}
+ </tbody>
+</table></div>
+
+{% set refs = first.refs|fromjson %}
+{% if refs %}
+<h2>References</h2>
+<div class="panel" style="padding:14px 18px">
+  <ul class="ref-list">
+  {% for u in refs %}<li><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

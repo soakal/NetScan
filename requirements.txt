@@ -1,0 +1,18 @@
+# Core
+requests>=2.31
+Flask>=3.0
+PyYAML>=6.0
+
+# Scanning engine (recommended). The python-nmap wrapper also needs the nmap
+# binary installed on the system:
+#   Debian/Ubuntu:  sudo apt install nmap
+#   RHEL/Fedora:    sudo dnf install nmap
+#   macOS:          brew install nmap
+# Without nmap, NetScan falls back to a basic pure-Python port/banner scanner
+# with limited fingerprinting (and therefore limited CVE correlation).
+python-nmap>=0.7.1
+
+# Optional — credentialed (authenticated) scanning. Only needed if you enable
+# `credentialed: true` in config. SSH uses paramiko; Windows/WinRM uses pywinrm.
+paramiko>=3.0
+pywinrm>=0.4.3

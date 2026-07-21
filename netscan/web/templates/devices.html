@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% set active = 'devices' %}
+{% block title %}NetScan — Devices{% endblock %}
+{% block scanpick %}
+<div class="scan-pick">scan
+<select onchange="location.href='/devices?scan='+this.value">
+  {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if s.id==scan_id }}>#{{ s.id }} · {{ s.finished_at|ts }}</option>{% endfor %}
+</select></div>
+{% endblock %}
+{% block body %}
+<h1>Devices</h1>
+<p class="sub">{{ hosts|length }} live device(s) · sorted by risk score</p>
+<div class="panel"><table>
+ <thead><tr><th>IP / hostname</th><th>MAC · vendor</th><th>OS / type</th>
+   <th>Findings</th><th>KEV</th><th>Risk</th></tr></thead>
+ <tbody>
+ {% for h in hosts %}
+  <tr>
+   <td><a href="/device/{{ h.id }}" class="mono-cell">{{ h.ip }}</a>
+      {% if h.auth_method and h.auth_method != 'network' %}<span class="badge sev-Low" title="credentialed scan">{{ h.auth_method }}</span>{% endif %}
+      {% if h.hostname %}<div style="color:var(--muted);font-size:12px">{{ h.hostname }}</div>{% endif %}
+      {% if h.vt_malicious %}<div><span class="badge sev-Critical">VT {{ h.vt_malicious }} malicious</span></div>{% endif %}</td>
+   <td class="mono-cell" style="color:var(--muted)">{{ h.mac or '—' }}{% if h.vendor %}<div>{{ h.vendor }}</div>{% endif %}</td>
+   <td style="color:var(--muted)">{{ h.os_name or '—' }}{% if h.device_type %}<div class="pill" style="display:inline-block;margin-top:3px">{{ h.device_type }}</div>{% endif %}</td>
+   <td class="mono-cell">{{ h.finding_count }}</td>
+   <td>{% if h.kev_count %}<span class="badge kev-badge">{{ h.kev_count }}</span>{% else %}<span style="color:var(--muted)">0</span>{% endif %}</td>
+   <td><span class="mono-cell">{{ h.risk_score }}</span>
+      <div class="risk-bar"><i style="width:{{ [h.risk_score,100]|min }}%"></i></div></td>
+  </tr>
+ {% else %}<tr><td colspan="6" class="empty">No devices in this scan.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+{% endblock %}

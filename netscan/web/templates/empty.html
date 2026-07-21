@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}NetScan{% endblock %}
+{% block body %}
+<div class="empty">
+  <h1>No scans yet</h1>
+  <p class="sub">Run a scan to populate the report:</p>
+  <p><code>python run.py scan -c config.yaml</code></p>
+</div>
+{% endblock %}

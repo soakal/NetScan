@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% set active = 'devices' %}
+{% block title %}NetScan — {{ host.ip }}{% endblock %}
+{% block body %}
+<div class="crumb"><a href="/devices">devices</a> / {{ host.ip }}</div>
+<h1>{{ host.ip }}{% if host.hostname %} <span style="color:var(--muted);font-size:16px">{{ host.hostname }}</span>{% endif %}</h1>
+<p class="sub">risk score <span class="pill">{{ host.risk_score }}</span>
+  {% if host.auth_method and host.auth_method != 'network' %}
+    <span class="badge" style="background:rgba(79,209,197,.13);color:var(--accent);border-color:rgba(79,209,197,.35)">credentialed · {{ host.auth_method }}</span>
+  {% else %}
+    <span class="badge sev-None">unauthenticated</span>
+  {% endif %}</p>
+
+<div class="two-col">
+ <div>
+  <h2>Device</h2>
+  <div class="panel" style="padding:16px 18px"><dl class="kv">
+   <dt>IP</dt><dd class="mono-cell">{{ host.ip }}</dd>
+   <dt>MAC</dt><dd class="mono-cell">{{ host.mac or '—' }}</dd>
+   <dt>Vendor (OUI)</dt><dd>{{ host.vendor or '—' }}</dd>
+   <dt>OS</dt><dd>{{ host.os_name or '—' }}{% if host.os_accuracy %} ({{ host.os_accuracy }}%){% endif %}</dd>
+   <dt>OS build/version</dt><dd class="mono-cell">{{ host.os_build or '—' }}</dd>
+   <dt>Device type</dt><dd>{{ host.device_type or '—' }}</dd>
+   <dt>Scan method</dt><dd>{{ host.auth_method or 'network' }}</dd>
+   {% if facts.kernel %}<dt>Kernel</dt><dd class="mono-cell">{{ facts.kernel|join(', ') }}</dd>{% endif %}
+   <dt>VT (IP)</dt><dd>{% if host.vt_malicious %}<span class="badge sev-Critical">{{ host.vt_malicious }} malicious</span>{% else %}—{% endif %}</dd>
+  </dl></div>
+ </div>
+ <div>
+  <h2>Open services</h2>
+  <div class="panel"><table>
+   <thead><tr><th>Port</th><th>Service</th><th>Product / version</th></tr></thead>
+   <tbody>
+   {% for s in services %}
+    <tr><td class="mono-cell">{{ s.port }}/{{ s.proto }}</td>
+        <td>{{ s.service or '—' }}</td>
+        <td class="mono-cell" style="color:var(--muted)">{{ s.product or '' }} {{ s.version or '' }}{% if not s.product %}—{% endif %}</td></tr>
+   {% else %}<tr><td colspan="3" style="color:var(--muted)">No open services.</td></tr>{% endfor %}
+   </tbody>
+  </table></div>
+ </div>
+</div>
+
+{% if firmware %}
+<h2>Firmware advisory</h2>
+<div class="note">
+  Recognized as network infrastructure (vendor: <strong>{{ firmware.product }}</strong>).
+  {% if firmware.version %}Detected version: <span class="mono-cell">{{ firmware.version }}</span>.{% endif %}
+  Check the vendor security-advisory page for firmware that fixes the CVEs below:
+  {% if firmware.cpe %}<a href="{{ firmware.cpe }}" target="_blank" rel="noopener">{{ firmware.cpe }}</a>{% endif %}
+</div>
+{% endif %}
+
+{% if software or facts.hotfix %}
+<div class="two-col">
+ {% if software %}
+ <div>
+  <h2>Installed software ({{ software|length }})</h2>
+  <div class="panel" style="max-height:340px;overflow:auto"><table>
+   <thead><tr><th>Package</th><th>Version</th><th>Matched</th></tr></thead>
+   <tbody>
+   {% for s in software %}
+    <tr><td class="mono-cell">{{ s.service }}</td>
+        <td class="mono-cell" style="color:var(--muted)">{{ s.version or '—' }}</td>
+        <td>{% if s.cpe %}<span class="badge sev-Low">CPE</span>{% else %}<span style="color:var(--faint)">—</span>{% endif %}</td></tr>
+   {% endfor %}
+   </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:8px;font-size:12px">"Matched" = mapped to a CPE and checked against NVD. Unmatched packages are inventory only.</p>
+ </div>
+ {% endif %}
+ {% if facts.hotfix %}
+ <div>
+  <h2>Installed hotfixes ({{ facts.hotfix|length }})</h2>
+  <div class="panel" style="padding:14px 18px;max-height:340px;overflow:auto">
+   {% for kb in facts.hotfix %}<span class="pill" style="display:inline-block;margin:3px 4px 3px 0">{{ kb }}</span>{% endfor %}
+  </div>
+  <p class="sub" style="margin-top:8px;font-size:12px">Read via Get-HotFix. Use these to confirm a specific KB is present after patching.
+  {% if facts.msrc_patched %}<br><strong>{{ facts.msrc_patched[0] }}</strong> recent MSRC CVEs already covered by installed/superseding KBs{% if facts.msrc_missing %}; <strong>{{ facts.msrc_missing[0] }}</strong> missing (see findings){% endif %}.{% endif %}</p>
+ </div>
+ {% endif %}
+</div>
+{% endif %}
+
+<h2>Findings ({{ findings|length }})</h2>
+<div class="panel"><table>
+ <thead><tr><th>CVE</th><th>Severity</th><th>EPSS</th><th>Weakness</th><th>Source</th><th>Loc</th><th>Status</th></tr></thead>
+ <tbody>
+ {% for f in findings %}
+  <tr>
+   <td><a href="/vuln/{{ f.cve_id }}" class="mono-cell">{{ f.cve_id }}</a>
+      {% if f.is_kev %} <span class="badge kev-badge">KEV</span>{% endif %}
+      {% if f.ransomware %} <span class="badge sev-Critical">ransomware</span>{% endif %}</td>
+   <td><span class="badge sev-{{ f.severity }}">{{ f.severity }}{% if f.cvss %} {{ f.cvss }}{% endif %}</span></td>
+   <td class="mono-cell">{{ f.epss|pct }}</td>
+   <td style="color:var(--muted);font-size:12px">{{ f.cwe_name or f.cwe or '—' }}</td>
+   <td>{% if f.source and f.source != 'network' %}<span class="badge" style="background:rgba(79,209,197,.12);color:var(--accent);border-color:rgba(79,209,197,.3)">{{ f.source }}</span>{% else %}<span style="color:var(--faint);font-size:11px">network</span>{% endif %}</td>
+   <td class="mono-cell">{% if f.port and f.port > 0 %}{{ f.port }}{% else %}<span class="badge sev-Low" title="from credentialed inventory">{{ f.service or 'local' }}</span>{% endif %}</td>
+   <td><span class="badge status-{{ f.status }}">{{ f.status|lower }}</span></td>
+  </tr>
+ {% else %}<tr><td colspan="7" class="empty">No vulnerabilities found on this device.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active = 'weak' %}
+{% block title %}NetScan — Weaknesses{% endblock %}
+{% block scanpick %}
+<div class="scan-pick">scan
+<select onchange="location.href='/weaknesses?scan='+this.value">
+  {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if s.id==scan_id }}>#{{ s.id }} · {{ s.finished_at|ts }}</option>{% endfor %}
+</select></div>
+{% endblock %}
+{% block body %}
+<h1>Weakness families</h1>
+<p class="sub">Findings classified by root-cause weakness, the way Hadrian OpenHack
+  organizes review — OWASP&nbsp;Top&nbsp;10:2025 families and MITRE&nbsp;CWE.
+  Most networked-service CVEs land in the supply-chain / outdated-components
+  family; this lens groups them by <em>why</em> they're vulnerable.</p>
+
+<h2>OWASP Top 10:2025 families</h2>
+<div class="panel"><table>
+ <thead><tr><th>Family</th><th>Findings</th><th>Distinct CVEs</th><th>Devices</th><th>Max CVSS</th><th>KEV</th></tr></thead>
+ <tbody>
+ {% for o in owasp %}
+  <tr>
+   <td>{{ o.owasp_name or 'Unclassified' }}</td>
+   <td class="mono-cell">{{ o.finding_count }}</td>
+   <td class="mono-cell">{{ o.cve_count }}</td>
+   <td class="mono-cell">{{ o.host_count }}</td>
+   <td class="mono-cell">{{ o.max_cvss or '—' }}</td>
+   <td>{% if o.is_kev %}<span class="badge kev-badge">yes</span>{% else %}<span style="color:var(--muted)">—</span>{% endif %}</td>
+  </tr>
+ {% else %}<tr><td colspan="6" class="empty">No findings.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+
+<h2>By CWE weakness</h2>
+<div class="panel"><table>
+ <thead><tr><th>CWE</th><th>Weakness</th><th>OWASP family</th><th>Findings</th><th>CVEs</th><th>Devices</th></tr></thead>
+ <tbody>
+ {% for w in cwe %}
+  <tr>
+   <td class="mono-cell">{{ w.cwe }}</td>
+   <td>{{ w.cwe_name or '—' }}</td>
+   <td style="color:var(--muted);font-size:12px">{{ w.owasp_name or '—' }}</td>
+   <td class="mono-cell">{{ w.finding_count }}</td>
+   <td class="mono-cell">{{ w.cve_count }}</td>
+   <td class="mono-cell">{{ w.host_count }}</td>
+  </tr>
+ {% else %}<tr><td colspan="6" class="empty">No CWE-classified findings.</td></tr>{% endfor %}
+ </tbody>
+</table></div>
+{% endblock %}
