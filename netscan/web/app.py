@@ -134,7 +134,8 @@ def create_app(db_path: str) -> Flask:
     def scans():
         db = get_db()
         all_scans = db.all_scans()
+        trend = db.lifecycle_trend()
         db.close()
-        return render_template("scans.html", scans=all_scans)
+        return render_template("scans.html", scans=all_scans, trend=trend)
 
     return app

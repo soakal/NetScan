@@ -6,9 +6,10 @@
 <p class="sub">Each scan is a point-in-time snapshot. Findings are diffed between
   consecutive scans to verify remediation.</p>
 <div class="panel"><table>
- <thead><tr><th>#</th><th>Finished</th><th>Profile</th><th>Targets</th><th>Devices</th><th>Findings</th></tr></thead>
+ <thead><tr><th>#</th><th>Finished</th><th>Profile</th><th>Targets</th><th>Devices</th><th>Findings</th><th>Opened</th><th>Closed</th><th>Recurring</th></tr></thead>
  <tbody>
  {% for s in scans %}
+  {% set t = trend.get(s.id, {}) %}
   <tr>
    <td class="mono-cell"><a href="/?scan={{ s.id }}">#{{ s.id }}</a></td>
    <td style="color:var(--muted)">{{ s.finished_at|ts }}</td>
@@ -16,8 +17,11 @@
    <td class="mono-cell" style="color:var(--muted)">{{ s.targets|fromjson|join(', ') }}</td>
    <td class="mono-cell">{{ s.host_count }}</td>
    <td class="mono-cell">{{ s.finding_count }}</td>
+   <td class="mono-cell">{{ t.get('opened', 0) }}</td>
+   <td class="mono-cell">{{ t.get('closed', 0) }}</td>
+   <td>{% if t.get('recurring', 0) %}<span class="badge kev-badge">{{ t.get('recurring', 0) }}</span>{% else %}<span style="color:var(--muted)">0</span>{% endif %}</td>
   </tr>
- {% else %}<tr><td colspan="6" class="empty">No scans yet. Run <code>python run.py scan</code>.</td></tr>{% endfor %}
+ {% else %}<tr><td colspan="9" class="empty">No scans yet. Run <code>python run.py scan</code>.</td></tr>{% endfor %}
  </tbody>
 </table></div>
 {% endblock %}
