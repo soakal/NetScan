@@ -14,6 +14,7 @@ single batched call, then enriched and written.
 from __future__ import annotations
 
 import sys
+import time
 
 from .config import Config
 from .db import Database
@@ -305,6 +306,7 @@ def run_scan(cfg: Config) -> int:
 
     # ---- Phase 3: enrich, score, persist ---------------------------------
     total_findings = 0
+    seen_rows: list[dict] = []
     for ph in per_host:
         host, host_id = ph["host"], ph["host_id"]
         host_key = host["host_key"]
@@ -318,6 +320,8 @@ def run_scan(cfg: Config) -> int:
             key = (host_key, f["cve_id"], f.get("port") or 0)
             status = "PERSISTING" if key in prior_keys else "NEW"
             db.add_finding(scan_id, host_id, host_key, f, status)
+            seen_rows.append({"host_key": host_key, "cve_id": f["cve_id"],
+                              "port": f.get("port")})
             total_findings += 1
 
         advice = check_firmware(host, ph["cves"])
@@ -339,6 +343,10 @@ def run_scan(cfg: Config) -> int:
                 "severity": row.get("severity"), "is_kev": row.get("is_kev"),
             })
     db.record_resolved(scan_id, resolved_rows)
+
+    ts = time.time()
+    db.mark_lifecycle_seen(seen_rows, ts)
+    db.mark_lifecycle_resolved(resolved_rows, ts)
 
     db.finish_scan(scan_id, host_count=len(hosts), finding_count=total_findings)
     print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
