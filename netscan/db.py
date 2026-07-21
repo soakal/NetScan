@@ -468,10 +468,14 @@ class Database:
     def lifecycle_trend(self, limit: int = 20) -> dict[int, dict]:
         """Per-scan finding_lifecycle counts, keyed by scan id, for the most
         recent `limit` finished scans: opened (first_seen fell within the
-        scan's [started_at, finished_at] window), closed (resolved_at fell
-        within that window), and recurring (recurred=1 AND last_seen fell
-        within that window). Lets the /scans view surface findings opened
-        vs. closed per scan and flag recurrences."""
+        scan's [started_at, finished_at] window), closed (counted from the
+        append-only resolved_findings table, attributed by scan_id -- NOT
+        from finding_lifecycle.resolved_at, which mark_lifecycle_seen clears
+        back to NULL if the finding later recurs, which would otherwise make
+        a scan's closed count retroactively drop to 0), and recurring
+        (recurred=1 AND last_seen fell within that window). Lets the /scans
+        view surface findings opened vs. closed per scan and flag
+        recurrences."""
         scans = self._conn.execute(
             "SELECT id, started_at, finished_at FROM scans "
             "WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
@@ -485,8 +489,8 @@ class Database:
                 "WHERE first_seen BETWEEN ? AND ?", (start, finish),
             ).fetchone()["n"]
             closed = self._conn.execute(
-                "SELECT COUNT(*) AS n FROM finding_lifecycle "
-                "WHERE resolved_at BETWEEN ? AND ?", (start, finish),
+                "SELECT COUNT(*) AS n FROM resolved_findings WHERE scan_id=?",
+                (sid,),
             ).fetchone()["n"]
             recurring = self._conn.execute(
                 "SELECT COUNT(*) AS n FROM finding_lifecycle "
