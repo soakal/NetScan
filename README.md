@@ -157,8 +157,9 @@ sudo apt install nmap        # Debian/Ubuntu
 # winget install Insecure.Nmap   # Windows
 ```
 
-On Windows, see [RUNNING.md](RUNNING.md) for a double-click `run.bat` launcher
-and a fuller setup walkthrough.
+See [RUNNING.md](RUNNING.md) for a fuller setup walkthrough, including the
+double-click `run.bat` launcher on Windows and the `run.sh` equivalent on
+Linux/macOS.
 
 If you skip this step, NetScan detects a missing Python dependency at
 startup, explains what it is and why it's needed, shows the exact
@@ -186,8 +187,11 @@ Keys can also come from the environment: `NETSCAN_NVD_API_KEY`,
 ## Run
 
 **Windows:** double-click `run.bat` for a menu (scan / serve / demo /
-profiles) instead of typing commands — see [RUNNING.md](RUNNING.md) for
-details. Everything below also works from a terminal on any platform.
+profiles) instead of typing commands.
+**Linux/macOS:** run `./run.sh` (`chmod +x run.sh` once first) for the same
+menu. See [RUNNING.md](RUNNING.md) for a full install/run walkthrough,
+including a step-by-step Linux install. Everything below also works from a
+terminal on any platform.
 
 ```bash
 # 1) scan (root/sudo recommended so nmap can do SYN + OS detection)
@@ -234,7 +238,8 @@ data can't get mixed into your real scan history.
 ```
 run.py                     CLI: scan / serve / demo / profiles
 run.bat                    Windows double-click launcher (menu over run.py)
-RUNNING.md                 setup/run walkthrough (start here on Windows)
+run.sh                     Linux/macOS launcher, same menu as run.bat
+RUNNING.md                 setup/run walkthrough (Windows + Linux install)
 LICENSE                    proprietary, all rights reserved (Copyright VRSI)
 config.example.yaml        copy to config.yaml
 netscan/

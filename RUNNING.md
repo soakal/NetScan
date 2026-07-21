@@ -1,8 +1,12 @@
 # Running NetScan
 
-## Easiest way — `run.bat`
+## Easiest way — `run.bat` (Windows) / `run.sh` (Linux/macOS)
 
-Double-click `run.bat` in this folder. You'll get a menu:
+**Windows:** double-click `run.bat` in this folder.
+**Linux/macOS:** run `./run.sh` from a terminal in this folder (make it
+executable once with `chmod +x run.sh` if needed).
+
+Both give you the same menu:
 
 ```
 1. Scan your network
@@ -18,6 +22,9 @@ Double-click `run.bat` in this folder. You'll get a menu:
   the script pauses so you can edit your real targets before scanning.
 - Press `Ctrl+C` to stop the report server (options 2/3/4) and return to the
   menu.
+- On Linux/macOS, `run.sh` warns (but doesn't force) if you're not root —
+  `sudo ./run.sh` gives nmap SYN scan + OS detection, which needs elevated
+  privileges to work accurately.
 
 ## Manual way (command line)
 
@@ -58,13 +65,55 @@ python run.py profiles
   machine-specific details there, not in tracked files.
 - Sanity check: `python -m pytest -q` should pass cleanly.
 
+## Installing on Linux
+
+1. **Get the code** — clone or copy this repository onto the machine, e.g.
+   `git clone <repo-url> netscan && cd netscan`.
+2. **Install Python 3.11+** if it isn't already present:
+   ```bash
+   sudo apt install python3 python3-pip   # Debian/Ubuntu
+   sudo dnf install python3 python3-pip   # RHEL/Fedora
+   sudo pacman -S python python-pip       # Arch
+   ```
+3. **Install nmap** (recommended, for accurate OS/service detection):
+   ```bash
+   sudo apt install nmap   # Debian/Ubuntu
+   sudo dnf install nmap   # RHEL/Fedora
+   sudo pacman -S nmap     # Arch
+   ```
+4. **Install the Python dependencies**:
+   ```bash
+   python3 -m pip install -r requirements.txt
+   ```
+   If you skip this, `run.py`/`run.sh` will detect the missing package at
+   startup, explain why it's needed, and prompt before installing it.
+5. **Make the launcher executable** (one-time):
+   ```bash
+   chmod +x run.sh
+   ```
+6. **Create your config**:
+   ```bash
+   cp config.example.yaml config.yaml
+   $EDITOR config.yaml   # set targets: to hosts/subnets you're authorized to scan
+   ```
+7. **Run it**: `sudo ./run.sh` → option 3 (scan, then serve), then open
+   http://127.0.0.1:8000. `sudo` is recommended (not required) so nmap can do
+   a SYN scan and OS fingerprinting; without it, NetScan still runs, just with
+   less accurate detection.
+8. **Automate re-scans** with a cron job or systemd timer, e.g. a crontab
+   entry running `python3 run.py scan -c config.yaml` nightly — each run is
+   its own record, and the **Scans** view in the report shows what opened,
+   closed, or recurred between runs.
+
 ## First run checklist
 
 1. Open `config.yaml` and confirm the `targets:` list is what you actually
    want scanned. Add anything under `exclude:` you want skipped (e.g. fragile
    devices, the scanner host itself).
-2. Run `run.bat` → option 3 (scan, then serve), or the manual commands above.
+2. Run `run.bat` (Windows) or `./run.sh` (Linux/macOS) → option 3 (scan, then
+   serve), or the manual commands above.
 3. Open http://127.0.0.1:8000 in a browser once the server starts.
-4. Re-run a scan later (cron/Task Scheduler, or just `run.bat` again) — each
-   scan is its own record, and the **Scans** view will show what opened,
-   closed, or recurred between runs.
+4. Re-run a scan later (cron/systemd timer on Linux, Task Scheduler on
+   Windows, or just re-run the launcher) — each scan is its own record, and
+   the **Scans** view will show what opened, closed, or recurred between
+   runs.
