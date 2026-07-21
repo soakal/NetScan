@@ -30,8 +30,15 @@ except ImportError:  # pragma: no cover
 SCAN_PROFILES: dict[str, dict[str, Any]] = {
     # Quietest. Recommended default. Top ~100 ports, polite timing, low rate.
     "light": {
+        # NOTE: --host-timeout must comfortably exceed how long `-sV` version
+        # detection takes over --top-ports 100 at -T2's polite timing. When the
+        # host timeout fires mid-version-scan, nmap DISCARDS the host's results
+        # entirely (reports 0 open ports), which silently turns "up but slow"
+        # hosts into "no services" -> nothing to correlate -> zero findings.
+        # 90s was too short (version detection alone needs ~100s+ per host), so
+        # this is 5m to match `standard` and leave ample headroom.
         "nmap_args": "-sV --version-intensity 2 -T2 --top-ports 100 "
-                     "--max-rate 50 --max-retries 1 --host-timeout 90s",
+                     "--max-rate 50 --max-retries 1 --host-timeout 5m",
         "os_detection": False,
         "description": "Quiet, top-100 ports, polite timing, low packet rate.",
     },

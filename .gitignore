@@ -1,5 +1,7 @@
 # Local config (real network targets / credentials — never commit)
 config.yaml
+config.*.yaml
+!config.example.yaml
 
 # Runtime data
 netscan.db
