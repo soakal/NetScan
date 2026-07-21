@@ -1,0 +1,11 @@
+# Local config (real network targets / credentials — never commit)
+config.yaml
+
+# Runtime data
+netscan.db
+.netscan_cache/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

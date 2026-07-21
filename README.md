@@ -33,6 +33,12 @@ tracked across scans so you can confirm a patch actually landed.
   checklist.
 - **Patch verification** — findings present in a prior scan but gone in the
   current one are reported as **Resolved**; still-present ones as **Persisting**.
+- **Scan history & trends** — every scan run is its own record (start/end time,
+  hosts attempted/succeeded/failed). Each finding's lifecycle is tracked across
+  scans (first seen, resolved, and **recurring** if it comes back after being
+  resolved), and the **Scans** view shows Opened/Closed/Recurring counts per
+  run so you can see remediation progress over time, not just a single
+  snapshot.
 - **Firmware advisories** for recognized network gear (switches/routers/APs/etc.):
   identifies the vendor and links its security-advisory page, flagged urgent when
   CVEs were correlated to the device.
