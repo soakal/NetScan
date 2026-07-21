@@ -139,7 +139,8 @@ def run_scan(cfg: Config) -> int:
         if cfg.credentialed and cfg.credentials:
             cred = cred_mod.credential_for(host, cfg.credentials)
             if cred:
-                res = cred_mod.scan_host(host, cred)
+                res = cred_mod.scan_host(host, cred,
+                                         strict_host_keys=cfg.strict_host_keys)
                 if res.ok:
                     cred_payload = res
                     host["auth_method"] = res.auth_method

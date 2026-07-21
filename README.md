@@ -237,4 +237,4 @@ netscan/
 - This is a self-hosted tool, not an audited security product. Verify before
   acting.
 
-MIT-style use at your own risk.
+Proprietary — Copyright (c) 2026 VRSI. All rights reserved. See [LICENSE](LICENSE).

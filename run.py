@@ -24,10 +24,25 @@ def cmd_scan(args) -> int:
     return 0
 
 
+# Hosts on which the Werkzeug debugger may safely listen. --debug enables the
+# interactive debugger, which is an arbitrary-code-execution endpoint for
+# anyone who can reach it, so it must never be bound to a network-facing host.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def cmd_serve(args) -> int:
     # No -c/--config given means the no-network demo trial (see `demo`
     # below) -- point at demo.db to match, never at a real scan's netscan.db.
     cfg = load_config(args.config) if args.config else Config(db_path="demo.db")
+    if args.debug and cfg.web_host not in _LOCAL_HOSTS:
+        print(
+            f"error: refusing to start: --debug enables the Werkzeug interactive "
+            f"debugger (remote code execution for anyone who can reach it), but "
+            f"web_host is {cfg.web_host!r}, which is not localhost. Set "
+            f"web_host: 127.0.0.1 in the config, or drop --debug.",
+            file=sys.stderr,
+        )
+        return 2
     from netscan.web import create_app
     app = create_app(cfg.db_path)
     print(f"Serving report at http://{cfg.web_host}:{cfg.web_port}")

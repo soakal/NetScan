@@ -44,18 +44,19 @@ List available scan profiles (`light` / `standard` / `thorough`):
 python run.py profiles
 ```
 
-## Current setup on this machine
+## Setup requirements
 
-- Python 3.14, with all dependencies installed: Flask, PyYAML, requests,
-  pytest, `python-nmap`, and the optional `paramiko`/`pywinrm` (for
-  credentialed scanning).
-- nmap 7.80 installed via `winget install Insecure.Nmap` — gives accurate
-  OS/service detection. Without it, NetScan falls back to a pure-Python
-  scanner (still works, just less precise).
-- `config.yaml` targets `10.10.10.0/23` (Ethernet) and `192.168.200.0/24`
-  (Ethernet 2), on the `light` (quiet, detection-only) scan profile. It is
-  gitignored — it holds your real network targets and stays local.
-- 18/18 tests pass (`python -m pytest -q`).
+- Python 3.11+ with the dependencies installed: Flask, PyYAML, requests,
+  pytest, `python-nmap`, and optionally `paramiko`/`pywinrm` (for
+  credentialed scanning) — `pip install -r requirements.txt`.
+- nmap (e.g. `winget install Insecure.Nmap` on Windows, or your distro's
+  package) — gives accurate OS/service detection. Without it, NetScan falls
+  back to a pure-Python scanner (still works, just less precise).
+- Your own `config.yaml` (copied from `config.example.yaml`) with the
+  subnets/hosts you are authorized to scan under `targets:`. It is
+  gitignored — it holds your real network targets and stays local; keep
+  machine-specific details there, not in tracked files.
+- Sanity check: `python -m pytest -q` should pass cleanly.
 
 ## First run checklist
 

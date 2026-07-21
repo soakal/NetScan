@@ -104,6 +104,13 @@ class Config:
     # accurate software/patch inventory. Quietest + most accurate scan mode.
     credentialed: bool = False
     credentials: list[Credential] = field(default_factory=list)
+    # Verify host identity during credentialed scans. Off by default so a first
+    # scan of a new fleet works with no pre-populated known_hosts / certs — the
+    # scanner then auto-accepts SSH host keys and skips WinRM TLS validation,
+    # which a MITM on the scan path could abuse to capture the scan credential.
+    # Set true (SSH: known_hosts required; WinRM: valid TLS cert required) once
+    # host keys/certs are provisioned.
+    strict_host_keys: bool = False
 
     # Accurate credentialed matching backends:
     #   OVAL  — distro security feeds for Linux (backport-aware, low FP)
@@ -152,6 +159,7 @@ def load_config(path: str | os.PathLike | None) -> Config:
         vt_check_host_ips=bool(data.get("vt_check_host_ips", False)),
         credentialed=bool(data.get("credentialed", False)),
         credentials=_parse_credentials(data.get("credentials", []) or []),
+        strict_host_keys=bool(data.get("strict_host_keys", False)),
         oval_matching=bool(data.get("oval_matching", True)),
         msrc_matching=bool(data.get("msrc_matching", True)),
         msrc_months=int(data.get("msrc_months", 3)),
