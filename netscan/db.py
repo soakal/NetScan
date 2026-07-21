@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS scans (
     finished_at  REAL,
     profile      TEXT,
     targets      TEXT,
-    host_count   INTEGER DEFAULT 0,
+    host_count   INTEGER DEFAULT 0,  -- hosts that responded (== succeeded)
+    hosts_attempted INTEGER,         -- targets expanded minus excludes; NULL if not derivable
+    hosts_failed    INTEGER,         -- max(0, hosts_attempted - host_count)
     finding_count INTEGER DEFAULT 0
 );
 
@@ -147,6 +149,7 @@ class Database:
         """Add columns introduced after a DB was first created. Safe to run
         every startup; only adds what's missing."""
         wanted = {
+            "scans": [("hosts_attempted", "INTEGER"), ("hosts_failed", "INTEGER")],
             "hosts": [("os_build", "TEXT"), ("auth_method", "TEXT DEFAULT 'network'")],
             "services": [("source", "TEXT DEFAULT 'network'")],
             "findings": [("source", "TEXT DEFAULT 'network'")],
@@ -181,11 +184,15 @@ class Database:
             )
             return int(cur.lastrowid)
 
-    def finish_scan(self, scan_id: int, host_count: int, finding_count: int) -> None:
+    def finish_scan(self, scan_id: int, host_count: int, finding_count: int,
+                    hosts_attempted: int | None = None,
+                    hosts_failed: int | None = None) -> None:
         with self.tx() as c:
             c.execute(
-                "UPDATE scans SET finished_at=?, host_count=?, finding_count=? WHERE id=?",
-                (time.time(), host_count, finding_count, scan_id),
+                "UPDATE scans SET finished_at=?, host_count=?, finding_count=?, "
+                "hosts_attempted=?, hosts_failed=? WHERE id=?",
+                (time.time(), host_count, finding_count, hosts_attempted,
+                 hosts_failed, scan_id),
             )
 
     def add_host(self, scan_id: int, host: dict[str, Any]) -> int:

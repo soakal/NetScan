@@ -21,7 +21,7 @@ from .db import Database
 from .enrich import Cache, EpssClient, KevCatalog, NvdClient, VirusTotalClient
 from .firmware import check_firmware
 from .remediation import steps_for
-from .scanner import discover_and_fingerprint
+from .scanner import _expand_targets, discover_and_fingerprint
 from .taxonomy import cwe_name, owasp_family_for
 
 _SEV_WEIGHT = {"Critical": 40, "High": 20, "Medium": 8, "Low": 2,
@@ -348,7 +348,22 @@ def run_scan(cfg: Config) -> int:
     db.mark_lifecycle_seen(seen_rows, ts)
     db.mark_lifecycle_resolved(resolved_rows, ts)
 
-    db.finish_scan(scan_id, host_count=len(hosts), finding_count=total_findings)
+    # hosts_attempted derives from the same target expansion the scanner used
+    # (CIDR/range/plain-IP targets). Hostname or otherwise unparseable targets
+    # expand to nothing, in which case attempted/failed aren't derivable --
+    # store NULL rather than a misleading 0 (host_count/"succeeded" is
+    # unaffected either way).
+    target_ips = set(_expand_targets(cfg.targets))
+    if target_ips:
+        excluded_ips = set(_expand_targets(cfg.exclude))
+        hosts_attempted = len(target_ips - excluded_ips)
+        hosts_failed = max(0, hosts_attempted - len(hosts))
+    else:
+        hosts_attempted = None
+        hosts_failed = None
+
+    db.finish_scan(scan_id, host_count=len(hosts), finding_count=total_findings,
+                   hosts_attempted=hosts_attempted, hosts_failed=hosts_failed)
     print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
           f"{len(resolved_rows)} resolved since last scan", file=sys.stderr)
     db.close()
