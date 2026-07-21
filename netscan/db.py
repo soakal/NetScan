@@ -275,6 +275,56 @@ class Database:
                  for r in rows],
             )
 
+    def mark_lifecycle_seen(self, rows: list[dict[str, Any]], ts: float) -> None:
+        """Upsert finding_lifecycle for each (host_key, cve_id, port) that was
+        present in this scan. New keys get first_seen=last_seen=ts. Keys that
+        were previously resolved and have now reappeared get recurred=1 and
+        resolved_at cleared. Everything else just bumps last_seen."""
+        if not rows:
+            return
+        with self.tx() as c:
+            for r in rows:
+                host_key = r["host_key"]
+                cve_id = r["cve_id"]
+                port = r.get("port") or 0
+                existing = c.execute(
+                    "SELECT resolved_at FROM finding_lifecycle "
+                    "WHERE host_key=? AND cve_id=? AND port=?",
+                    (host_key, cve_id, port),
+                ).fetchone()
+                if existing is None:
+                    c.execute(
+                        """INSERT INTO finding_lifecycle(host_key, cve_id, port,
+                                first_seen, last_seen, resolved_at, recurred)
+                           VALUES (?,?,?,?,?,NULL,0)""",
+                        (host_key, cve_id, port, ts, ts),
+                    )
+                elif existing["resolved_at"] is not None:
+                    c.execute(
+                        """UPDATE finding_lifecycle
+                           SET last_seen=?, resolved_at=NULL, recurred=1
+                           WHERE host_key=? AND cve_id=? AND port=?""",
+                        (ts, host_key, cve_id, port),
+                    )
+                else:
+                    c.execute(
+                        """UPDATE finding_lifecycle SET last_seen=?
+                           WHERE host_key=? AND cve_id=? AND port=?""",
+                        (ts, host_key, cve_id, port),
+                    )
+
+    def mark_lifecycle_resolved(self, rows: list[dict[str, Any]], ts: float) -> None:
+        """Set resolved_at for each (host_key, cve_id, port) that is currently
+        tracked as unresolved. Keys with no finding_lifecycle row are a no-op."""
+        if not rows:
+            return
+        with self.tx() as c:
+            c.executemany(
+                """UPDATE finding_lifecycle SET resolved_at=?
+                   WHERE host_key=? AND cve_id=? AND port=? AND resolved_at IS NULL""",
+                [(ts, r["host_key"], r["cve_id"], r.get("port") or 0) for r in rows],
+            )
+
     # ---- read path ----------------------------------------------------
 
     def latest_scan_id(self) -> int | None:
