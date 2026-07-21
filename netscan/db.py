@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS finding_lifecycle (
     last_seen   REAL,
     resolved_at REAL,
     recurred    INTEGER DEFAULT 0,
+    recurred_at REAL,             -- ts of the scan that triggered the most
+                                   -- recent recurrence; NULL until then
     UNIQUE(host_key, cve_id, port)
 );
 """
@@ -153,6 +155,7 @@ class Database:
             "hosts": [("os_build", "TEXT"), ("auth_method", "TEXT DEFAULT 'network'")],
             "services": [("source", "TEXT DEFAULT 'network'")],
             "findings": [("source", "TEXT DEFAULT 'network'")],
+            "finding_lifecycle": [("recurred_at", "REAL")],
         }
         for table, cols in wanted.items():
             existing = {r["name"] for r in self._conn.execute(
@@ -309,9 +312,10 @@ class Database:
                 elif existing["resolved_at"] is not None:
                     c.execute(
                         """UPDATE finding_lifecycle
-                           SET last_seen=?, resolved_at=NULL, recurred=1
+                           SET last_seen=?, resolved_at=NULL, recurred=1,
+                               recurred_at=?
                            WHERE host_key=? AND cve_id=? AND port=?""",
-                        (ts, host_key, cve_id, port),
+                        (ts, ts, host_key, cve_id, port),
                     )
                 else:
                     c.execute(
@@ -480,7 +484,10 @@ class Database:
         from finding_lifecycle.resolved_at, which mark_lifecycle_seen clears
         back to NULL if the finding later recurs, which would otherwise make
         a scan's closed count retroactively drop to 0), and recurring
-        (recurred=1 AND last_seen fell within that window). Lets the /scans
+        (recurred=1 AND recurred_at fell within that window -- recurred_at is
+        set only at the moment a resolved finding reappears, so unlike
+        last_seen it doesn't keep advancing on every later scan the finding
+        is merely still present in). Lets the /scans
         view surface findings opened vs. closed per scan and flag
         recurrences."""
         scans = self._conn.execute(
@@ -501,7 +508,7 @@ class Database:
             ).fetchone()["n"]
             recurring = self._conn.execute(
                 "SELECT COUNT(*) AS n FROM finding_lifecycle "
-                "WHERE recurred=1 AND last_seen BETWEEN ? AND ?", (start, finish),
+                "WHERE recurred=1 AND recurred_at BETWEEN ? AND ?", (start, finish),
             ).fetchone()["n"]
             out[sid] = {"opened": opened, "closed": closed, "recurring": recurring}
         return out

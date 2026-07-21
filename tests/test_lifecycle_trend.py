@@ -13,14 +13,15 @@ from netscan.db import Database
 
 
 def _insert_lifecycle(db: Database, host_key, cve_id, port, first_seen,
-                       last_seen, resolved_at=None, recurred=0):
+                       last_seen, resolved_at=None, recurred=0,
+                       recurred_at=None):
     with db.tx() as c:
         c.execute(
             """INSERT INTO finding_lifecycle(host_key, cve_id, port,
-                    first_seen, last_seen, resolved_at, recurred)
-               VALUES (?,?,?,?,?,?,?)""",
+                    first_seen, last_seen, resolved_at, recurred, recurred_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
             (host_key, cve_id, port or 0, first_seen, last_seen, resolved_at,
-             recurred),
+             recurred, recurred_at),
         )
 
 
@@ -62,10 +63,12 @@ def test_lifecycle_trend_buckets_opened_closed_recurring_per_scan(tmp_path):
 
         # Finding B: opened AND recurring inside scan2's window (simulates
         # a finding that was resolved earlier -- outside any tracked
-        # scan window here -- and reappears during scan2).
+        # scan window here -- and reappears during scan2). recurred_at is
+        # what "recurring" windows on, so it must be set to when the
+        # recurrence happened, same as first_seen/last_seen here.
         _insert_lifecycle(db, "dd:ee:ff", "CVE-2024-0002", 80,
                            first_seen=22.0, last_seen=22.0, resolved_at=None,
-                           recurred=1)
+                           recurred=1, recurred_at=22.0)
 
         trend = db.lifecycle_trend()
 
@@ -153,6 +156,56 @@ def test_lifecycle_trend_closed_count_survives_later_recurrence(tmp_path):
         assert trend[scan2]["closed"] == 1
         assert trend[scan1]["opened"] == 1
         assert trend[scan3]["recurring"] == 1
+    finally:
+        db.close()
+
+
+def test_lifecycle_trend_recurring_does_not_bleed_into_later_scans(tmp_path):
+    """Regression test: 'recurring' must be attributed to the scan where the
+    recurrence actually happened, not to every later scan the finding merely
+    remains present in.
+
+    Sequence, driven through the real write-path methods: finding opens in
+    scan 1, resolves in scan 2, recurs in scan 3 (mark_lifecycle_seen's
+    recurrence branch), then just stays present in scan 4. Before this fix,
+    'recurring' windowed on last_seen -- which keeps advancing every scan the
+    finding is merely still present in -- so recurred=1 would bleed forward
+    and scan 4 would incorrectly also show recurring=1.
+    """
+    db = Database(str(tmp_path / "trend_recur_bleed.db"))
+    try:
+        host_key, cve_id, port = "aa:bb:cc", "CVE-2024-0100", 8080
+        row = {"host_key": host_key, "cve_id": cve_id, "port": port}
+
+        # scan 1: window [0, 10] -- finding opens here.
+        scan1 = db.create_scan("light", ["10.0.0.0/24"])
+        db.finish_scan(scan1, host_count=1, finding_count=1)
+        _set_scan_window(db, scan1, 0.0, 10.0)
+        db.mark_lifecycle_seen([row], 5.0)
+
+        # scan 2: window [20, 30] -- finding resolves here.
+        scan2 = db.create_scan("light", ["10.0.0.0/24"])
+        db.finish_scan(scan2, host_count=1, finding_count=0)
+        _set_scan_window(db, scan2, 20.0, 30.0)
+        db.record_resolved(scan2, [{**row, "severity": "High", "is_kev": 0}])
+        db.mark_lifecycle_resolved([row], 25.0)
+
+        # scan 3: window [40, 50] -- finding recurs here.
+        scan3 = db.create_scan("light", ["10.0.0.0/24"])
+        db.finish_scan(scan3, host_count=1, finding_count=1)
+        _set_scan_window(db, scan3, 40.0, 50.0)
+        db.mark_lifecycle_seen([row], 45.0)
+
+        # scan 4: window [60, 70] -- finding is simply still present;
+        # last_seen advances again but this is NOT a new recurrence.
+        scan4 = db.create_scan("light", ["10.0.0.0/24"])
+        db.finish_scan(scan4, host_count=1, finding_count=1)
+        _set_scan_window(db, scan4, 60.0, 70.0)
+        db.mark_lifecycle_seen([row], 65.0)
+
+        trend = db.lifecycle_trend()
+        assert trend[scan3]["recurring"] == 1
+        assert trend[scan4]["recurring"] == 0
     finally:
         db.close()
 

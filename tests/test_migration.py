@@ -138,7 +138,7 @@ def test_migration_adds_finding_lifecycle_without_data_loss(tmp_path):
             "PRAGMA table_info(finding_lifecycle)").fetchall()}
         assert cols == {
             "id", "host_key", "cve_id", "port",
-            "first_seen", "last_seen", "resolved_at", "recurred",
+            "first_seen", "last_seen", "resolved_at", "recurred", "recurred_at",
         }
 
         # It's empty -- nothing populates it yet.
