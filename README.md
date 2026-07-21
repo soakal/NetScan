@@ -82,6 +82,12 @@ install the optional deps: `pip install paramiko pywinrm`. Use a dedicated
 read-only service account — not a domain admin — and keep the config file out of
 version control.
 
+By default, host identity isn't verified (a first connection to a new host
+has no known_hosts entry to check against), so credentialed scanning prints a
+one-time warning that a MITM could capture the scan credential. Set
+`strict_host_keys: true` to enforce verification instead — unknown or changed
+hosts then fail their credentialed scan rather than being trusted silently.
+
 ### Accurate matching backends: OVAL (Linux) + MSRC (Windows)
 
 Credentialed scanning gets much more accurate when the package/patch inventory is
@@ -142,14 +148,26 @@ a substitute.
 ## Install
 
 ```bash
-cd netscan
 python3 -m pip install -r requirements.txt
 
 # Recommended: install the nmap binary for OS detection + CPE-based CVE matching
 sudo apt install nmap        # Debian/Ubuntu
 # sudo dnf install nmap      # RHEL/Fedora
 # brew install nmap          # macOS
+# winget install Insecure.Nmap   # Windows
 ```
+
+On Windows, see [RUNNING.md](RUNNING.md) for a double-click `run.bat` launcher
+and a fuller setup walkthrough.
+
+If you skip this step, NetScan detects a missing Python dependency at
+startup, explains what it is and why it's needed, shows the exact
+`pip install` command, and asks before running it (never silently — a
+security tool installing software without asking would be a red flag in
+itself). Pass `--auto-install` to skip the prompt for scripted/unattended
+runs. This only ever covers Python packages from `requirements.txt`; nmap
+itself is never auto-installed (see the warning `scan` prints if it's
+missing, which includes the right install command for your OS).
 
 Get a free **NVD API key** (raises the rate limit 10x — strongly recommended for
 anything bigger than a handful of hosts):
@@ -185,9 +203,12 @@ report diffs consecutive runs to show what got fixed.
 ### Try the UI with no network
 
 ```bash
-python run.py demo      # seeds synthetic findings into netscan.db
-python run.py serve     # explore the dashboard offline
+python run.py demo      # seeds synthetic findings into demo.db
+python run.py serve     # explore the dashboard offline (reads demo.db)
 ```
+
+Demo mode always writes to its own `demo.db`, never `netscan.db` — synthetic
+data can't get mixed into your real scan history.
 
 ---
 
@@ -208,6 +229,9 @@ python run.py serve     # explore the dashboard offline
 
 ```
 run.py                     CLI: scan / serve / demo / profiles
+run.bat                    Windows double-click launcher (menu over run.py)
+RUNNING.md                 setup/run walkthrough (start here on Windows)
+LICENSE                    proprietary, all rights reserved (Copyright VRSI)
 config.example.yaml        copy to config.yaml
 netscan/
   config.py                config + scan profiles + credentials
@@ -221,8 +245,9 @@ netscan/
   firmware.py              network-device firmware advisory framework
   correlate.py             orchestrates a full scan + cross-scan diff
   db.py                    SQLite persistence
-  demo.py                  synthetic data seeder
+  demo.py                  synthetic data seeder (writes demo.db, not netscan.db)
   web/                     Flask report (app.py + templates/)
+tests/                     pytest suite
 ```
 
 ## Limitations
@@ -230,6 +255,13 @@ netscan/
 - Unauthenticated, black-box scanning: less accurate than credentialed scanning,
   and version-only CVE matching can produce false positives (a backported fix may
   not change the banner version). Treat findings as leads to confirm.
+- Modern, well-configured Windows hosts often don't expose detailed version
+  banners over SMB/RPC/RDP at all, even with the `thorough` profile — nmap may
+  report the port open with no usable version string, which means nothing to
+  correlate against NVD. Zero findings on such a host is a real "couldn't
+  determine a version," not a confirmed "no vulnerabilities." Credentialed
+  scanning (above) reads the actual installed-hotfix list instead of guessing
+  from banners, and is the only way to get a definitive answer on those hosts.
 - The OWASP/CWE family mapping and CWE name table are curated best-effort, not an
   authoritative MITRE/OWASP mapping.
 - Firmware checks point you at vendor advisories rather than auto-comparing

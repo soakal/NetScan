@@ -245,7 +245,13 @@ def discover_and_fingerprint(cfg: Config) -> list[dict[str, Any]]:
     """Return a list of host dicts, each with a `services` list."""
     if nmap_available():
         return _scan_with_nmap(cfg)
+    if sys.platform == "win32":
+        install_hint = "winget install --id Insecure.Nmap -e (then open a new terminal)"
+    elif sys.platform == "darwin":
+        install_hint = "brew install nmap"
+    else:
+        install_hint = "sudo apt install nmap  (or dnf/pacman/etc. for your distro)"
     print("[warn] nmap not found — using the pure-Python fallback scanner. "
-          "Install nmap for OS detection and CPE-based CVE correlation.",
-          file=sys.stderr)
+          "Install nmap for OS detection and CPE-based CVE correlation: "
+          f"{install_hint}", file=sys.stderr)
     return _scan_with_sockets(cfg)
