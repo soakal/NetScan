@@ -15,7 +15,7 @@
    <td style="color:var(--muted)">{{ s.finished_at|ts }}</td>
    <td><span class="pill">{{ s.profile }}</span></td>
    <td class="mono-cell" style="color:var(--muted)">{{ s.targets|fromjson|join(', ') }}</td>
-   <td class="mono-cell">{{ s.host_count }}</td>
+   <td class="mono-cell">{{ s.host_count }}{% if s.hosts_attempted is not none %}<span style="color:var(--muted)"> / {{ s.hosts_attempted }} attempted{% if s.hosts_failed %}, {{ s.hosts_failed }} failed{% endif %}</span>{% endif %}</td>
    <td class="mono-cell">{{ s.finding_count }}</td>
    <td class="mono-cell">{{ t.get('opened', 0) }}</td>
    <td class="mono-cell">{{ t.get('closed', 0) }}</td>

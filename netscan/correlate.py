@@ -334,9 +334,15 @@ def run_scan(cfg: Config) -> int:
         db.set_host_risk(host_id, _risk_score(ph["findings"]))
 
     # ---- Patch verification: present last scan, absent now = resolved ----
+    # Only count a finding resolved if its host actually responded this scan
+    # -- an unreachable/offline host tells us nothing about whether the
+    # finding is fixed, so leave its lifecycle untouched rather than falsely
+    # "resolving" it (which would then read as a false "recurrence" if the
+    # host comes back later with the same finding still present).
+    current_host_keys = {host["host_key"] for host in hosts}
     resolved_rows = []
     for key, row in prior_full.items():
-        if key not in current_keys:
+        if key not in current_keys and row["host_key"] in current_host_keys:
             resolved_rows.append({
                 "host_key": row["host_key"], "ip": row.get("ip"),
                 "cve_id": row["cve_id"], "port": row.get("port"),

@@ -2,17 +2,21 @@
 finding_lifecycle table across real scans (not just the direct db.py unit
 tests in test_lifecycle.py, which never exercise run_scan itself).
 
-Runs run_scan() three times against a temp sqlite db with the network-facing
+Runs run_scan() against a temp sqlite db with the network-facing
 collaborators (discover_and_fingerprint, KevCatalog, NvdClient, EpssClient,
 VirusTotalClient) monkeypatched to deterministic offline stand-ins, so no
-real network I/O happens:
+real network I/O happens.
 
-  scan 1: the vulnerable host/service is present  -> finding created,
-          finding_lifecycle row inserted (first_seen == last_seen == ts1).
-  scan 2: the host disappears (down / patched)     -> resolved_findings row
-          written and finding_lifecycle.resolved_at set.
-  scan 3: the finding reappears                    -> finding_lifecycle shows
-          recurred=1, resolved_at cleared again, first_seen still == ts1.
+Two scenarios matter here and must NOT be conflated (see
+test_run_scan_host_down_does_not_resolve_findings for why):
+
+  - the host responds and the vulnerable service is genuinely gone (patched)
+    -> that's a real resolution, finding_lifecycle.resolved_at gets set.
+  - the host simply doesn't respond this scan (down/unreachable/timed out)
+    -> we never actually checked, so the finding's lifecycle must be left
+       untouched rather than falsely "resolved" (which would otherwise
+       misreport as a "recurrence" the next time the host comes back with
+       the same finding still present).
 """
 from __future__ import annotations
 
@@ -24,7 +28,10 @@ CVE_ID = "CVE-2099-0001"
 CPE = "cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*"
 
 
-def _host():
+def _host(vulnerable=True):
+    """A responding host. With vulnerable=False it's still live/scanned, just
+    without the service that produced the CVE finding (i.e. genuinely
+    patched) -- distinct from the host not responding at all."""
     return {
         "ip": "10.0.0.5", "mac": HOST_KEY, "vendor": None, "hostname": "widget-host",
         "os_name": None, "os_accuracy": None, "device_type": None,
@@ -32,7 +39,7 @@ def _host():
         "services": [{
             "port": 443, "proto": "tcp", "state": "open", "service": "https",
             "product": "widget", "version": "1.0", "cpe": CPE, "cpes": [CPE],
-        }],
+        }] if vulnerable else [],
     }
 
 
@@ -125,14 +132,14 @@ def test_run_scan_wires_finding_lifecycle(tmp_path, monkeypatch):
     assert row1["recurred"] == 0
     first_seen = row1["first_seen"]
 
-    # --- scan 2: host/finding absent (down or fixed) -----------------------------
-    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [])
+    # --- scan 2: host still responds, but the vulnerable service is gone (patched) --
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [_host(vulnerable=False)])
     correlate.run_scan(cfg)
 
     row2 = _lifecycle_row(cfg)
     assert row2 is not None
     assert row2["first_seen"] == first_seen        # unchanged
-    assert row2["resolved_at"] is not None          # resolved after disappearance
+    assert row2["resolved_at"] is not None          # resolved -- host confirmed it's gone
     assert row2["recurred"] == 0
 
     # --- scan 3: finding reappears ------------------------------------------------
@@ -144,3 +151,43 @@ def test_run_scan_wires_finding_lifecycle(tmp_path, monkeypatch):
     assert row3["first_seen"] == first_seen         # preserved across the whole run
     assert row3["resolved_at"] is None               # cleared on recurrence
     assert row3["recurred"] == 1
+
+
+def test_run_scan_host_down_does_not_resolve_findings(tmp_path, monkeypatch):
+    """A host that simply doesn't respond this scan must NOT have its prior
+    findings marked resolved -- we never actually checked, so we don't know.
+    Regression test: this used to be conflated with a genuine patch (see the
+    scenario above), which meant a flaky/offline host would falsely resolve
+    every one of its findings, then falsely "recur" the moment it came back
+    with the same findings still present -- pure noise on the /scans trend
+    view, not real remediation signal."""
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+
+    cfg = _make_cfg(tmp_path)
+
+    # --- scan 1: host responds, finding present ------------------------------------
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [_host()])
+    correlate.run_scan(cfg)
+    row1 = _lifecycle_row(cfg)
+    assert row1 is not None
+    assert row1["resolved_at"] is None
+
+    # --- scan 2: host doesn't respond at all (down/unreachable) --------------------
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [])
+    correlate.run_scan(cfg)
+    row2 = _lifecycle_row(cfg)
+    assert row2 is not None
+    assert row2["resolved_at"] is None              # untouched -- host was never checked
+    assert row2["last_seen"] == row1["last_seen"]   # untouched
+    assert row2["recurred"] == 0
+
+    # --- scan 3: host responds again, finding still present ------------------------
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [_host()])
+    correlate.run_scan(cfg)
+    row3 = _lifecycle_row(cfg)
+    assert row3 is not None
+    assert row3["resolved_at"] is None              # never resolved, so no false "recurrence"
+    assert row3["recurred"] == 0                    # critically: NOT flagged as recurring

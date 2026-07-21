@@ -134,7 +134,10 @@ def create_app(db_path: str) -> Flask:
     def scans():
         db = get_db()
         all_scans = db.all_scans()
-        trend = db.lifecycle_trend()
+        # Match the trend query's window to every scan actually rendered --
+        # lifecycle_trend()'s own default limit (20) would otherwise silently
+        # show 0/0/0 for older scans instead of their real counts.
+        trend = db.lifecycle_trend(limit=len(all_scans)) if all_scans else {}
         db.close()
         return render_template("scans.html", scans=all_scans, trend=trend)
 

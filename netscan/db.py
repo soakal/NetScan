@@ -121,7 +121,9 @@ CREATE INDEX IF NOT EXISTS idx_hosts_scan    ON hosts(scan_id);
 
 -- Per-(host, cve, port) lineage across scans: when it was first/last seen,
 -- when it was resolved (if ever), and whether it came back after resolution.
--- Not yet populated or read anywhere; a later step wires that up.
+-- Populated by mark_lifecycle_seen()/mark_lifecycle_resolved() (called from
+-- correlate.run_scan and demo.seed) and read by lifecycle_trend(), which
+-- backs the Opened/Closed/Recurring counts on the /scans view.
 CREATE TABLE IF NOT EXISTS finding_lifecycle (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     host_key    TEXT NOT NULL,

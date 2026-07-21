@@ -91,6 +91,7 @@ def seed(db_path: str) -> int:
 
     count = 0
     per_host_findings = {0: [], 1: [], 2: []}
+    seen_rows = []
     for (hi, port, svc, prod, ver, cpe, cve, cvss, sev, cwe, kev, ransom, epss, pct) in _F:
         okey, oname = owasp_family_for(cwe)
         kev_entry = {"requiredAction": "Apply vendor updates per vendor instructions.",
@@ -109,6 +110,7 @@ def seed(db_path: str) -> int:
         f["remediation"] = steps_for(f, kev_entry)
         db.add_finding(scan_id, host_ids[hi], _HOSTS[hi]["mac"], f, "NEW")
         per_host_findings[hi].append(f)
+        seen_rows.append({"host_key": _HOSTS[hi]["mac"], "cve_id": cve, "port": port})
         count += 1
 
     # risk scores
@@ -161,6 +163,16 @@ def seed(db_path: str) -> int:
     db.add_fact(host_ids[0], "msrc_patched", "61")
     db.add_fact(host_ids[0], "msrc_missing", "1")
 
-    db.finish_scan(scan_id, host_count=len(_HOSTS), finding_count=count + 2)
+    # Populate the lifecycle table too, so the /scans trend view (Opened /
+    # Closed / Recurring) isn't blank for a demo scan the way it would be if
+    # only add_finding() were called.
+    seen_rows.append({"host_key": _HOSTS[1]["mac"], "cve_id": oval_f["cve_id"],
+                      "port": oval_f.get("port")})
+    seen_rows.append({"host_key": _HOSTS[0]["mac"], "cve_id": msrc_f["cve_id"],
+                      "port": msrc_f.get("port")})
+    db.mark_lifecycle_seen(seen_rows, time.time())
+
+    db.finish_scan(scan_id, host_count=len(_HOSTS), finding_count=count + 2,
+                   hosts_attempted=len(_HOSTS), hosts_failed=0)
     db.close()
     return count + 2

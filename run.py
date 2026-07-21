@@ -25,7 +25,9 @@ def cmd_scan(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    cfg = load_config(args.config) if args.config else Config()
+    # No -c/--config given means the no-network demo trial (see `demo`
+    # below) -- point at demo.db to match, never at a real scan's netscan.db.
+    cfg = load_config(args.config) if args.config else Config(db_path="demo.db")
     from netscan.web import create_app
     app = create_app(cfg.db_path)
     print(f"Serving report at http://{cfg.web_host}:{cfg.web_port}")
@@ -36,7 +38,9 @@ def cmd_serve(args) -> int:
 def cmd_demo(args) -> int:
     """Seed the DB with synthetic findings so you can explore the UI offline."""
     from netscan.demo import seed
-    db_path = args.db or "netscan.db"
+    # Defaults to its own demo.db, never netscan.db -- demo data must never
+    # mix with a real scan's history (finding lifecycle, resolved/recurring).
+    db_path = args.db or "demo.db"
     n = seed(db_path)
     print(f"Seeded demo data into {db_path} ({n} findings). "
           f"Now run: python run.py serve")
