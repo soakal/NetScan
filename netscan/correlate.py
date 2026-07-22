@@ -98,6 +98,7 @@ def run_scan(cfg: Config) -> int:
     scan_id: int | None = None
     hosts: list = []
     total_findings = 0
+    published = False
     try:
         cache = Cache(cfg.cache_dir)
         kev = KevCatalog(cache, cfg.kev_cache_hours).load()
@@ -404,13 +405,19 @@ def run_scan(cfg: Config) -> int:
             resolved_rows=resolved_rows,
             ts=ts,
         )
-        print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
-              f"{len(resolved_rows)} resolved since last scan", file=sys.stderr)
+        published = True
+        try:
+            print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
+                  f"{len(resolved_rows)} resolved since last scan", file=sys.stderr)
+        except OSError:
+            # Reporting success to stderr is best-effort; the atomic database
+            # publication has already committed and must not be relabeled.
+            pass
         return scan_id
     except Exception as exc:
         # Record the failure, but do not publish it as the latest report or use
         # its partial findings as the baseline for the next successful scan.
-        if scan_id is not None:
+        if scan_id is not None and not published:
             try:
                 db.fail_scan(scan_id, str(exc), host_count=len(hosts),
                              finding_count=total_findings)

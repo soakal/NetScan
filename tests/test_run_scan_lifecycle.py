@@ -20,6 +20,7 @@ test_run_scan_host_down_does_not_resolve_findings for why):
 """
 from __future__ import annotations
 
+import builtins
 import pytest
 
 import netscan.correlate as correlate
@@ -359,5 +360,41 @@ def test_late_publish_failure_rolls_back_lifecycle_and_resolutions(
                WHERE s.status='FAILED'"""
         ).fetchone()["id"]
         assert db.host(failed_host_id) is None
+    finally:
+        db.close()
+
+
+def test_post_publish_log_failure_cannot_relabel_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+    cfg = _make_cfg(tmp_path)
+
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint", lambda cfg: [_host()]
+    )
+    correlate.run_scan(cfg)
+
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint",
+        lambda cfg: [_host(vulnerable=False)],
+    )
+
+    def flaky_print(*args, **kwargs):
+        if args and " done:" in str(args[0]):
+            raise OSError("stderr closed")
+        return builtins.print(*args, **kwargs)
+
+    monkeypatch.setattr(correlate, "print", flaky_print, raising=False)
+    second_scan = correlate.run_scan(cfg)
+
+    from netscan.db import Database
+    db = Database(cfg.db_path)
+    try:
+        row = db.scan(second_scan)
+        assert row["status"] == "SUCCESS"
+        assert db.latest_scan_id() == second_scan
+        assert _lifecycle_row(cfg)["resolved_at"] is not None
     finally:
         db.close()
