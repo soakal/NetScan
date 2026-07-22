@@ -170,16 +170,27 @@ class NvdClient:
                     NVD_API_URL, headers=headers, params=params, timeout=40
                 )
                 if resp.status_code == 404:
-                    self.cache.put("nvd", cpe23, [])
-                    return []
+                    if start_index == 0:
+                        self.cache.put("nvd", cpe23, [])
+                        return []
+                    raise NvdLookupError(
+                        f"NVD returned 404 at page offset {start_index} for {cpe23}"
+                    )
                 resp.raise_for_status()
                 payload = resp.json()
+                if "totalResults" not in payload:
+                    raise ValueError("NVD response omitted totalResults")
                 batch = payload.get("vulnerabilities", []) or []
+                total = int(payload["totalResults"])
+                if not batch and start_index < total:
+                    raise NvdLookupError(
+                        f"NVD returned an empty page at offset {start_index} "
+                        f"before totalResults={total} for {cpe23}"
+                    )
                 for item in batch:
                     f = self._normalize(item)
                     if f:
                         findings.append(f)
-                total = int(payload.get("totalResults") or 0)
                 start_index += len(batch)
                 if not batch or start_index >= total:
                     break

@@ -79,3 +79,27 @@ def test_later_page_failure_is_not_treated_as_empty_or_cached(tmp_path, monkeypa
         client.cves_for_cpe(cpe)
     assert calls == [0, 200]
     assert cache.get("nvd", cpe, 24) is None
+
+
+@pytest.mark.parametrize("failure_kind", ["404", "empty"])
+def test_incomplete_later_page_never_caches_partial_results(
+        tmp_path, monkeypatch, failure_kind):
+    cache = Cache(str(tmp_path / "cache"))
+    client = NvdClient(cache, api_key=None, max_age_hours=24)
+    monkeypatch.setattr(client, "_throttle", lambda: None)
+    cpe = "cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*"
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        start = int(params["startIndex"])
+        if start == 0:
+            batch = [{"cve": {"id": f"CVE-2099-{i:04d}"}} for i in range(200)]
+            return _Resp(200, {"totalResults": 350, "vulnerabilities": batch})
+        if failure_kind == "404":
+            return _Resp(404, {})
+        return _Resp(200, {"totalResults": 350, "vulnerabilities": []})
+
+    monkeypatch.setattr("netscan.enrich.requests.get", fake_get)
+
+    with pytest.raises(NvdLookupError):
+        client.cves_for_cpe(cpe)
+    assert cache.get("nvd", cpe, 24) is None

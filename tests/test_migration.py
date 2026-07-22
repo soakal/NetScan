@@ -185,3 +185,29 @@ def test_migration_adds_finding_lifecycle_without_data_loss(tmp_path):
         assert any(r["cve_id"] == "CVE-2024-9999" for r in grouped)
     finally:
         db.close()
+
+
+def test_migrated_unfinished_scan_is_not_reportable(tmp_path):
+    db_path = str(tmp_path / "interrupted.db")
+    _seed_old_db(db_path)
+    raw = sqlite3.connect(db_path)
+    try:
+        raw.execute(
+            """INSERT INTO scans(started_at, finished_at, profile, targets)
+               VALUES (3.0, NULL, 'light', '[]')"""
+        )
+        interrupted_id = raw.execute(
+            "SELECT MAX(id) FROM scans"
+        ).fetchone()[0]
+        raw.commit()
+    finally:
+        raw.close()
+
+    db = Database(db_path)
+    try:
+        # Migration gives legacy rows a SUCCESS default, but an interrupted row
+        # remains unpublishable because it has no finished_at.
+        assert db.is_successful_scan(interrupted_id) is False
+        assert interrupted_id not in {row["id"] for row in db.all_scans()}
+    finally:
+        db.close()

@@ -288,6 +288,90 @@ class Database:
                 (time.time(), host_count, finding_count, error[:2000], scan_id),
             )
 
+    def finalize_scan(self, scan_id: int, host_count: int, finding_count: int,
+                      hosts_attempted: int | None, hosts_failed: int | None,
+                      seen_rows: list[dict[str, Any]],
+                      resolved_rows: list[dict[str, Any]], ts: float) -> None:
+        """Atomically publish a scan and its lifecycle transitions.
+
+        If any insert/update fails, the resolution/lifecycle changes roll back
+        with the SUCCESS transition. The caller can then mark the scan FAILED
+        without corrupting history.
+        """
+        with self.tx() as c:
+            if resolved_rows:
+                c.executemany(
+                    """INSERT INTO resolved_findings(
+                           scan_id, host_key, ip, cve_id, port, severity,
+                           is_kev, resolved_at
+                       ) VALUES (?,?,?,?,?,?,?,?)""",
+                    [
+                        (
+                            scan_id, row["host_key"], row.get("ip"),
+                            row["cve_id"], row.get("port"), row.get("severity"),
+                            int(bool(row.get("is_kev"))), ts,
+                        )
+                        for row in resolved_rows
+                    ],
+                )
+
+            for row in seen_rows:
+                host_key = row["host_key"]
+                cve_id = row["cve_id"]
+                port = row.get("port") or 0
+                existing = c.execute(
+                    """SELECT resolved_at FROM finding_lifecycle
+                       WHERE host_key=? AND cve_id=? AND port=?""",
+                    (host_key, cve_id, port),
+                ).fetchone()
+                if existing is None:
+                    c.execute(
+                        """INSERT INTO finding_lifecycle(
+                               host_key, cve_id, port, first_seen, last_seen,
+                               resolved_at, recurred
+                           ) VALUES (?,?,?,?,?,NULL,0)""",
+                        (host_key, cve_id, port, ts, ts),
+                    )
+                elif existing["resolved_at"] is not None:
+                    c.execute(
+                        """UPDATE finding_lifecycle
+                           SET last_seen=?, resolved_at=NULL, recurred=1,
+                               recurred_at=?
+                           WHERE host_key=? AND cve_id=? AND port=?""",
+                        (ts, ts, host_key, cve_id, port),
+                    )
+                else:
+                    c.execute(
+                        """UPDATE finding_lifecycle SET last_seen=?
+                           WHERE host_key=? AND cve_id=? AND port=?""",
+                        (ts, host_key, cve_id, port),
+                    )
+
+            if resolved_rows:
+                c.executemany(
+                    """UPDATE finding_lifecycle SET resolved_at=?
+                       WHERE host_key=? AND cve_id=? AND port=?
+                         AND resolved_at IS NULL""",
+                    [
+                        (ts, row["host_key"], row["cve_id"], row.get("port") or 0)
+                        for row in resolved_rows
+                    ],
+                )
+
+            cur = c.execute(
+                """UPDATE scans
+                   SET finished_at=?, host_count=?, finding_count=?,
+                       hosts_attempted=?, hosts_failed=?, status='SUCCESS',
+                       error=NULL
+                   WHERE id=? AND status='RUNNING'""",
+                (
+                    ts, host_count, finding_count, hosts_attempted, hosts_failed,
+                    scan_id,
+                ),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError(f"scan #{scan_id} is not in RUNNING state")
+
     def add_host(self, scan_id: int, host: dict[str, Any]) -> int:
         with self.tx() as c:
             cur = c.execute(
@@ -482,7 +566,9 @@ class Database:
 
     def is_successful_scan(self, scan_id: int) -> bool:
         row = self._conn.execute(
-            "SELECT 1 FROM scans WHERE id=? AND status='SUCCESS'", (scan_id,)
+            """SELECT 1 FROM scans
+               WHERE id=? AND status='SUCCESS' AND finished_at IS NOT NULL""",
+            (scan_id,)
         ).fetchone()
         return row is not None
 
@@ -499,7 +585,13 @@ class Database:
         ).fetchall()]
 
     def host(self, host_id: int) -> dict | None:
-        row = self._conn.execute("SELECT * FROM hosts WHERE id=?", (host_id,)).fetchone()
+        row = self._conn.execute(
+            """SELECT h.* FROM hosts h
+               JOIN scans s ON s.id=h.scan_id
+               WHERE h.id=? AND s.status='SUCCESS'
+                 AND s.finished_at IS NOT NULL""",
+            (host_id,),
+        ).fetchone()
         return dict(row) if row else None
 
     def services(self, host_id: int) -> list[dict]:

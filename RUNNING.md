@@ -93,7 +93,7 @@ python run.py profiles
    ```
 6. **Create your config**:
    ```bash
-   cp config.example.yaml config.yaml
+   (umask 077 && cp config.example.yaml config.yaml)
    $EDITOR config.yaml   # set targets: to hosts/subnets you're authorized to scan
    ```
 7. **Run it**: `./run.sh` → option 3 (scan, then serve), then open

@@ -297,3 +297,67 @@ def test_run_scan_finalizes_on_failure(tmp_path, monkeypatch):
         assert db.all_scans() == []
     finally:
         db.close()
+
+
+def test_late_publish_failure_rolls_back_lifecycle_and_resolutions(
+        tmp_path, monkeypatch):
+    """Lifecycle changes are atomic with the SUCCESS scan transition."""
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+    cfg = _make_cfg(tmp_path)
+
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint", lambda cfg: [_host()]
+    )
+    first_scan = correlate.run_scan(cfg)
+
+    from netscan.db import Database as RealDatabase
+
+    class PublishFailDatabase(RealDatabase):
+        def __init__(self, path):
+            super().__init__(path)
+            self._conn.executescript(
+                """CREATE TRIGGER IF NOT EXISTS test_fail_publish
+                   BEFORE UPDATE OF status ON scans
+                   WHEN NEW.status='SUCCESS'
+                   BEGIN
+                     SELECT RAISE(ABORT, 'publish failed');
+                   END;"""
+            )
+
+    monkeypatch.setattr(correlate, "Database", PublishFailDatabase)
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint",
+        lambda cfg: [_host(vulnerable=False)],
+    )
+    with pytest.raises(Exception, match="publish failed"):
+        correlate.run_scan(cfg)
+
+    db = RealDatabase(cfg.db_path)
+    try:
+        lifecycle = db._conn.execute(
+            """SELECT resolved_at FROM finding_lifecycle
+               WHERE host_key=? AND cve_id=? AND port=443""",
+            (HOST_KEY, CVE_ID),
+        ).fetchone()
+        assert lifecycle["resolved_at"] is None
+        assert db._conn.execute(
+            "SELECT COUNT(*) FROM resolved_findings"
+        ).fetchone()[0] == 0
+        assert db.latest_scan_id() == first_scan
+        statuses = [
+            row["status"] for row in db._conn.execute(
+                "SELECT status FROM scans ORDER BY id"
+            ).fetchall()
+        ]
+        assert statuses == ["SUCCESS", "FAILED"]
+
+        failed_host_id = db._conn.execute(
+            """SELECT h.id FROM hosts h JOIN scans s ON s.id=h.scan_id
+               WHERE s.status='FAILED'"""
+        ).fetchone()["id"]
+        assert db.host(failed_host_id) is None
+    finally:
+        db.close()

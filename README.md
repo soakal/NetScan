@@ -179,7 +179,7 @@ https://nvd.nist.gov/developers/request-an-api-key
 ## Configure
 
 ```bash
-cp config.example.yaml config.yaml
+(umask 077 && cp config.example.yaml config.yaml)
 $EDITOR config.yaml          # set `targets:` and, ideally, nvd_api_key
 ```
 

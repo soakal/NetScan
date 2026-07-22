@@ -378,11 +378,7 @@ def run_scan(cfg: Config) -> int:
             }
 
         resolved_rows = list(resolved_by_key.values())
-        db.record_resolved(scan_id, resolved_rows)
-
         ts = time.time()
-        db.mark_lifecycle_seen(seen_rows, ts)
-        db.mark_lifecycle_resolved(resolved_rows, ts)
 
         # hosts_attempted derives from the same target expansion the scanner used
         # (CIDR/range/plain-IP targets). Hostname or otherwise unparseable targets
@@ -398,8 +394,16 @@ def run_scan(cfg: Config) -> int:
             hosts_attempted = None
             hosts_failed = None
 
-        db.finish_scan(scan_id, host_count=len(hosts), finding_count=total_findings,
-                       hosts_attempted=hosts_attempted, hosts_failed=hosts_failed)
+        db.finalize_scan(
+            scan_id,
+            host_count=len(hosts),
+            finding_count=total_findings,
+            hosts_attempted=hosts_attempted,
+            hosts_failed=hosts_failed,
+            seen_rows=seen_rows,
+            resolved_rows=resolved_rows,
+            ts=ts,
+        )
         print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
               f"{len(resolved_rows)} resolved since last scan", file=sys.stderr)
         return scan_id
