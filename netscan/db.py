@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS findings (
     owasp_key   TEXT,                 -- OWASP 2025 family key
     owasp_name  TEXT,
     priority    REAL DEFAULT 0,       -- blended urgency score
+    version_unverified INTEGER DEFAULT 0, -- detected version unknown/unrangeable vs NVD data
     summary     TEXT,
     remediation TEXT,                 -- JSON list of steps
     refs        TEXT,                 -- JSON list of reference URLs
@@ -156,7 +157,8 @@ class Database:
             "scans": [("hosts_attempted", "INTEGER"), ("hosts_failed", "INTEGER")],
             "hosts": [("os_build", "TEXT"), ("auth_method", "TEXT DEFAULT 'network'")],
             "services": [("source", "TEXT DEFAULT 'network'")],
-            "findings": [("source", "TEXT DEFAULT 'network'")],
+            "findings": [("source", "TEXT DEFAULT 'network'"),
+                         ("version_unverified", "INTEGER DEFAULT 0")],
             "finding_lifecycle": [("recurred_at", "REAL")],
         }
         for table, cols in wanted.items():
@@ -258,14 +260,16 @@ class Database:
                 """INSERT INTO findings(scan_id, host_id, host_key, cve_id, port,
                         service, product, version, cpe, cvss, severity, is_kev,
                         ransomware, epss, epss_pct, cwe, cwe_name, owasp_key,
-                        owasp_name, priority, summary, remediation, refs, source, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        owasp_name, priority, version_unverified, summary,
+                        remediation, refs, source, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (scan_id, host_id, host_key, f["cve_id"], f.get("port"),
                  f.get("service"), f.get("product"), f.get("version"), f.get("cpe"),
                  f.get("cvss"), f.get("severity"), int(bool(f.get("is_kev"))),
                  int(bool(f.get("ransomware"))), f.get("epss", 0), f.get("epss_pct", 0),
                  f.get("cwe"), f.get("cwe_name"), f.get("owasp_key"),
                  f.get("owasp_name"), f.get("priority", 0),
+                 int(bool(f.get("version_unverified"))),
                  f.get("summary"), json.dumps(f.get("remediation", [])),
                  json.dumps(f.get("refs", [])), f.get("source", "network"), status),
             )
@@ -425,6 +429,7 @@ class Database:
                       MAX(epss) AS epss,
                       MAX(epss_pct) AS epss_pct,
                       MAX(priority) AS priority,
+                      MIN(version_unverified) AS version_unverified,
                       cwe, cwe_name, owasp_key, owasp_name,
                       summary,
                       COUNT(DISTINCT host_id) AS host_count

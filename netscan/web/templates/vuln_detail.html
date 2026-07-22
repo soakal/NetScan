@@ -6,6 +6,7 @@
 <h1>{{ cve_id }}
   {% if first.is_kev %}<span class="badge kev-badge">KEV</span>{% endif %}
   {% if first.ransomware %}<span class="badge sev-Critical">ransomware</span>{% endif %}
+  {% if first.version_unverified %}<span class="badge sev-None" title="Detected version couldn't be confirmed against NVD's affected-version range -- ranked lower and worth double-checking manually">unverified</span>{% endif %}
 </h1>
 
 <div class="grid cards">

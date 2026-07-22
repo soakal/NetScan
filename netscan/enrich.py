@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -107,6 +108,86 @@ class KevCatalog:
 # NVD
 # ---------------------------------------------------------------------------
 
+def _version_key(v: str) -> list[tuple[int, Any]]:
+    """Tokenize a version string for ordering comparison. CPE/product versions
+    aren't semver (e.g. '4.6.3', '4.15.13p1', '2008r2') so we split into
+    digit/alpha runs rather than assuming a fixed number of numeric fields.
+    Each token is tagged (0, int) or (1, str) so digit and alpha tokens never
+    get directly compared against each other (which would raise in Python 3)."""
+    tokens = re.findall(r"\d+|[A-Za-z]+", v or "")
+    return [(0, int(t)) if t.isdigit() else (1, t.lower()) for t in tokens]
+
+
+def _compare_versions(a: str, b: str) -> int:
+    ka, kb = _version_key(a), _version_key(b)
+    if ka < kb:
+        return -1
+    if ka > kb:
+        return 1
+    return 0
+
+
+def _matching_cpe_matches(cve: dict, cpe23: str) -> list[dict]:
+    """Pull the cpeMatch entries from a raw NVD CVE record whose `criteria`
+    shares the queried CPE's part:vendor:product prefix. NVD's cves/2.0
+    response for a CPE query includes the *full* configurations block for
+    every matched CVE, which is where the actual affected-version bounds
+    live (versionStart/EndIncluding/Excluding) -- the cpeName match itself
+    just means "this product appears somewhere in the config", not "this
+    exact version is vulnerable"."""
+    prefix = ":".join(cpe23.split(":")[:5])  # cpe:2.3:<part>:<vendor>:<product>
+    out: list[dict] = []
+    for config in cve.get("configurations") or []:
+        for node in config.get("nodes", []):
+            for cm in node.get("cpeMatch", []):
+                if not cm.get("vulnerable"):
+                    continue
+                criteria = cm.get("criteria", "")
+                if not criteria.startswith(prefix + ":"):
+                    continue
+                fields = criteria.split(":")
+                version = fields[5] if len(fields) > 5 else None
+                out.append({
+                    "version": version,
+                    "start_incl": cm.get("versionStartIncluding"),
+                    "start_excl": cm.get("versionStartExcluding"),
+                    "end_incl": cm.get("versionEndIncluding"),
+                    "end_excl": cm.get("versionEndExcluding"),
+                })
+    return out
+
+
+def version_covers(detected_version: str | None, constraints: list[dict]) -> bool | None:
+    """Does `detected_version` fall inside any of the affected-version
+    constraints NVD reports for this CVE/CPE pairing?
+
+    Returns True (affected), False (definitively out of range -- safe to drop
+    the finding), or None (can't tell: no detected version, or NVD gave us no
+    constraint data to check against -- keep the finding but flag it as
+    unverified rather than silently dropping or silently trusting it).
+    """
+    if not detected_version or not constraints:
+        return None
+    for c in constraints:
+        version = c.get("version")
+        if version and version not in ("*", "-"):
+            if _compare_versions(detected_version, version) == 0:
+                return True
+            continue
+        ok = True
+        if c.get("start_incl") and _compare_versions(detected_version, c["start_incl"]) < 0:
+            ok = False
+        if c.get("start_excl") and _compare_versions(detected_version, c["start_excl"]) <= 0:
+            ok = False
+        if c.get("end_incl") and _compare_versions(detected_version, c["end_incl"]) > 0:
+            ok = False
+        if c.get("end_excl") and _compare_versions(detected_version, c["end_excl"]) >= 0:
+            ok = False
+        if ok:
+            return True
+    return False
+
+
 def _severity_from_cvss(score: float | None) -> str:
     if score is None:
         return "Unknown"
@@ -138,8 +219,15 @@ class NvdClient:
         self._last_request = time.time()
 
     def cves_for_cpe(self, cpe23: str) -> list[dict]:
-        """Return normalized CVE findings affecting a given CPE (with version)."""
-        cached = self.cache.get("nvd", cpe23, self.max_age_hours)
+        """Return normalized CVE findings affecting a given CPE (with version).
+
+        Cache namespace is "nvd2" (not "nvd") because entries now carry a
+        `version_constraints` field that older cached "nvd" entries don't
+        have -- bumping the namespace forces a clean refetch instead of
+        correlate.py silently treating old cache hits as "no constraint
+        data" forever until the 168h TTL happens to expire.
+        """
+        cached = self.cache.get("nvd2", cpe23, self.max_age_hours)
         if cached is not None:
             return cached
 
@@ -152,7 +240,7 @@ class NvdClient:
         try:
             resp = requests.get(NVD_API_URL, headers=headers, params=params, timeout=40)
             if resp.status_code == 404:
-                self.cache.put("nvd", cpe23, [])
+                self.cache.put("nvd2", cpe23, [])
                 return []
             resp.raise_for_status()
             payload = resp.json()
@@ -160,9 +248,9 @@ class NvdClient:
             print(f"[nvd] lookup failed for {cpe23}: {e}", file=sys.stderr)
             return []  # don't cache transient failures
 
-        findings = [self._normalize(item) for item in payload.get("vulnerabilities", [])]
+        findings = [self._normalize(item, cpe23) for item in payload.get("vulnerabilities", [])]
         findings = [f for f in findings if f]
-        self.cache.put("nvd", cpe23, findings)
+        self.cache.put("nvd2", cpe23, findings)
         return findings
 
     def cve_by_id(self, cve_id: str) -> dict | None:
@@ -192,7 +280,7 @@ class NvdClient:
         return norm
 
     @staticmethod
-    def _normalize(item: dict) -> dict | None:
+    def _normalize(item: dict, cpe23: str | None = None) -> dict | None:
         cve = item.get("cve") or {}
         cve_id = cve.get("id")
         if not cve_id:
@@ -222,6 +310,7 @@ class NvdClient:
                 val = d.get("value", "")
                 if val.upper().startswith("CWE-") and val not in cwes:
                     cwes.append(val)
+        version_constraints = _matching_cpe_matches(cve, cpe23) if cpe23 else []
         return {
             "cve_id": cve_id,
             "summary": summary,
@@ -232,6 +321,7 @@ class NvdClient:
             "cwes": cwes,
             "refs": refs,
             "published": cve.get("published"),
+            "version_constraints": version_constraints,
         }
 
 

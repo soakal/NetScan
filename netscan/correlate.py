@@ -18,7 +18,7 @@ import time
 
 from .config import Config
 from .db import Database
-from .enrich import Cache, EpssClient, KevCatalog, NvdClient, VirusTotalClient
+from .enrich import Cache, EpssClient, KevCatalog, NvdClient, VirusTotalClient, version_covers
 from .firmware import check_firmware
 from .remediation import steps_for
 from .scanner import _expand_targets, discover_and_fingerprint
@@ -27,6 +27,12 @@ from .taxonomy import cwe_name, owasp_family_for
 _SEV_WEIGHT = {"Critical": 40, "High": 20, "Medium": 8, "Low": 2,
                "None": 0, "Unknown": 1}
 _KEV_MULTIPLIER = 2.5
+# Applied when we could neither confirm nor rule out that the detected
+# version falls in the CVE's affected range (nmap couldn't resolve an exact
+# version, or NVD gave us no configurations to check against). Still
+# surfaced -- an unversioned service *might* be the vulnerable build -- but
+# ranked below anything we've actually confirmed against real version data.
+_UNVERIFIED_DAMPENER = 0.5
 
 
 def _sev_from_hint(hint: str | None) -> str | None:
@@ -76,6 +82,8 @@ def _priority(f: dict) -> float:
         score += 40.0
     if f.get("ransomware"):
         score += 20.0
+    if f.get("version_unverified"):
+        score *= _UNVERIFIED_DAMPENER
     return round(score, 1)
 
 
@@ -86,6 +94,8 @@ def _risk_score(findings: list[dict]) -> float:
         if f.get("is_kev"):
             w *= _KEV_MULTIPLIER
         w *= (1.0 + (f.get("epss") or 0.0))  # exploit likelihood up to ~2x
+        if f.get("version_unverified"):
+            w *= _UNVERIFIED_DAMPENER
         score += w
     return round(score, 1)
 
@@ -267,6 +277,17 @@ def run_scan(cfg: Config) -> int:
                 if not cpe:
                     continue
                 for cve in nvd.cves_for_cpe(cpe):
+                    # NVD's cpeName match just means "this product's history
+                    # includes the queried CPE" -- when nmap resolved a real
+                    # version, cross-check it against the CVE's actual
+                    # affected-version bounds so an old CVE for a long-patched
+                    # release (e.g. CVE-2017-7494 against a modern Samba)
+                    # doesn't get flagged just because the product matches.
+                    covered = version_covers(svc.get("version"),
+                                              cve.get("version_constraints") or [])
+                    if covered is False:
+                        continue
+
                     key = (host_key, cve["cve_id"], svc.get("port") or 0)
                     if key in current_keys:
                         continue
@@ -294,6 +315,7 @@ def run_scan(cfg: Config) -> int:
                         "summary": cve.get("summary"),
                         "refs": cve.get("refs", []),
                         "source": svc.get("source", "network"),
+                        "version_unverified": covered is None,
                         "_kev_entry": kev_entry,
                         "_lead_steps": [],
                     }

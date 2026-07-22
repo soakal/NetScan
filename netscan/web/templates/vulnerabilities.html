@@ -19,7 +19,8 @@
    <td class="mono-cell" style="font-weight:600">{{ c.priority|round(0)|int }}</td>
    <td><a href="/vuln/{{ c.cve_id }}" class="mono-cell">{{ c.cve_id }}</a>
       {% if c.is_kev %} <span class="badge kev-badge">KEV</span>{% endif %}
-      {% if c.ransomware %} <span class="badge sev-Critical">ransomware</span>{% endif %}</td>
+      {% if c.ransomware %} <span class="badge sev-Critical">ransomware</span>{% endif %}
+      {% if c.version_unverified %} <span class="badge sev-None" title="Detected version couldn't be confirmed against NVD's affected-version range">unverified</span>{% endif %}</td>
    <td><span class="badge sev-{{ c.severity }}">{{ c.severity }}{% if c.cvss %} {{ c.cvss }}{% endif %}</span></td>
    <td class="mono-cell" title="percentile {{ c.epss_pct|pct }}">{{ c.epss|pct }}</td>
    <td style="color:var(--muted);font-size:12px">{{ c.owasp_name or '—' }}</td>
