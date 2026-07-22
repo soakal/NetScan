@@ -82,11 +82,11 @@ install the optional deps: `pip install paramiko pywinrm`. Use a dedicated
 read-only service account — not a domain admin — and keep the config file out of
 version control.
 
-By default, host identity isn't verified (a first connection to a new host
-has no known_hosts entry to check against), so credentialed scanning prints a
-one-time warning that a MITM could capture the scan credential. Set
-`strict_host_keys: true` to enforce verification instead — unknown or changed
-hosts then fail their credentialed scan rather than being trusted silently.
+By default, credentialed scans **verify** host identity (`strict_host_keys: true`
+— SSH known_hosts / WinRM TLS certs required). Unknown or changed hosts fail
+their credentialed scan rather than being trusted silently. For a first lab
+scan without provisioned keys/certs, set `strict_host_keys: false` (prints a
+one-time MITM warning).
 
 ### Accurate matching backends: OVAL (Linux) + MSRC (Windows)
 

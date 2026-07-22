@@ -31,8 +31,26 @@ pause() {
 sudo_hint() {
     if [ "$(id -u)" -ne 0 ]; then
         echo "Note: not running as root — nmap SYN scan/OS detection is more"
-        echo "accurate with 'sudo ./run.sh'. Continuing without it."
+        echo "accurate with elevated privileges for the *scan* only."
+        echo "Prefer: sudo \"$PYTHON\" run.py scan -c config.yaml"
+        echo "then serve as your normal user (option 2). Continuing without it."
         echo
+    fi
+}
+
+# Run the report server without root when possible (scan may need sudo; serve should not).
+serve_report() {
+    echo
+    echo "Starting report server at http://127.0.0.1:8000"
+    echo "Press Ctrl+C to stop."
+    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+        echo "Dropping privileges to ${SUDO_USER} for the report server."
+        sudo -u "$SUDO_USER" -- "$PYTHON" run.py serve -c config.yaml
+    else
+        if [ "$(id -u)" -eq 0 ]; then
+            echo "WARNING: report server is running as root. Prefer serving as a normal user."
+        fi
+        "$PYTHON" run.py serve -c config.yaml
     fi
 }
 
@@ -67,28 +85,35 @@ EOF
             ;;
         2)
             check_config || { pause; continue; }
-            echo
-            echo "Starting report server at http://127.0.0.1:8000"
-            echo "Press Ctrl+C to stop."
-            "$PYTHON" run.py serve -c config.yaml
+            serve_report
             ;;
         3)
             check_config || { pause; continue; }
             sudo_hint
             echo "Running scan..."
-            "$PYTHON" run.py scan -c config.yaml
-            echo
-            echo "Starting report server at http://127.0.0.1:8000"
-            echo "Press Ctrl+C to stop."
-            "$PYTHON" run.py serve -c config.yaml
+            if ! "$PYTHON" run.py scan -c config.yaml; then
+                echo
+                echo "Scan failed. Not starting the report server."
+                pause
+                continue
+            fi
+            serve_report
             ;;
         4)
             echo
             echo "Seeding demo data..."
-            "$PYTHON" run.py demo
+            if ! "$PYTHON" run.py demo; then
+                echo "Demo seed failed. Not starting the report server."
+                pause
+                continue
+            fi
             echo "Starting report server at http://127.0.0.1:8000"
             echo "Press Ctrl+C to stop."
-            "$PYTHON" run.py serve
+            if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+                sudo -u "$SUDO_USER" -- "$PYTHON" run.py serve
+            else
+                "$PYTHON" run.py serve
+            fi
             ;;
         5)
             echo

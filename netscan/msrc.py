@@ -169,25 +169,30 @@ def correlate(parsed: dict, host_product_keys: list[str],
 
     A vuln is considered for this host only if it has a vendor-fix KB tied to a
     product whose name matches one of host_product_keys.
+
+    Fail closed: if the OS caption couldn't be mapped to product keys, or those
+    keys match no products in this MSRC corpus, return empty results rather than
+    treating every Windows fix as applicable (which produces massive false
+    positives on unrecognized captions).
     """
+    if not host_product_keys:
+        return {"missing": [], "patched": []}
+
     products = parsed.get("products", {})
     supersedes = parsed.get("supersedes", {})
 
     # product ids whose name matches the host
     host_pids = {pid for pid, name in products.items()
                  if any(k in (name or "").lower() for k in host_product_keys)}
+    if not host_pids:
+        return {"missing": [], "patched": []}
 
     installed = {normalize_kb(k) for k in installed_kbs}
     covered = _expand_installed(installed, supersedes)
 
     missing, patched = [], []
     for v in parsed.get("vulns", []):
-        # Keep fixes that apply to this host's product(s). If we couldn't match
-        # the host to any product id, be permissive and consider all fixes.
-        if host_pids:
-            host_fixes = [f for f in v["fixes"] if set(f["product_ids"]) & host_pids]
-        else:
-            host_fixes = list(v["fixes"])
+        host_fixes = [f for f in v["fixes"] if set(f["product_ids"]) & host_pids]
         if not host_fixes:
             continue
         fixing_kbs = {f["kb"] for f in host_fixes}

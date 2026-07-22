@@ -19,6 +19,10 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None
 
+# Hard cap on IP expansion for CIDR/range targets. A typo like /8 would
+# otherwise materialize millions of addresses and hang the scanner.
+MAX_TARGET_HOSTS = 65536
+
 # Scan profiles control how aggressive (and how noisy) the scan is.
 #
 # The whole point of the "light"/default profile is to stay quiet: polite
@@ -111,13 +115,12 @@ class Config:
     # accurate software/patch inventory. Quietest + most accurate scan mode.
     credentialed: bool = False
     credentials: list[Credential] = field(default_factory=list)
-    # Verify host identity during credentialed scans. Off by default so a first
-    # scan of a new fleet works with no pre-populated known_hosts / certs — the
-    # scanner then auto-accepts SSH host keys and skips WinRM TLS validation,
-    # which a MITM on the scan path could abuse to capture the scan credential.
-    # Set true (SSH: known_hosts required; WinRM: valid TLS cert required) once
-    # host keys/certs are provisioned.
-    strict_host_keys: bool = False
+    # Verify host identity during credentialed scans. On by default (SSH:
+    # known_hosts required; WinRM: valid TLS cert required). Set false only for
+    # a first lab/fleet scan when you have not provisioned host keys/certs yet —
+    # that mode auto-accepts SSH keys and skips WinRM TLS validation, which a
+    # MITM on the scan path could abuse to capture the scan credential.
+    strict_host_keys: bool = True
 
     # Accurate credentialed matching backends:
     #   OVAL  — distro security feeds for Linux (backport-aware, low FP)
@@ -147,6 +150,61 @@ class Config:
         return SCAN_PROFILES[self.scan_profile]
 
 
+def _as_bool(value: Any, default: bool, field_name: str) -> bool:
+    """Parse YAML bools without the `bool("false") is True` footgun."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "yes", "1", "on"):
+            return True
+        if v in ("false", "no", "0", "off", ""):
+            return False
+    raise ValueError(
+        f"config field {field_name!r}: expected a boolean, got {value!r}"
+    )
+
+
+def _as_str_list(value: Any, field_name: str) -> list[str]:
+    """Normalize targets/exclude to a list of strings.
+
+    A bare scalar (common YAML mistake: `targets: 10.0.0.1`) becomes a
+    one-element list. Rejects values that look like nmap option injection.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, list):
+        items = value
+    else:
+        raise ValueError(
+            f"config field {field_name!r}: expected a list of strings, got "
+            f"{type(value).__name__}"
+        )
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise ValueError(
+                f"config field {field_name!r}: each entry must be a string, "
+                f"got {item!r}"
+            )
+        s = item.strip()
+        if not s:
+            continue
+        if s.startswith("-"):
+            raise ValueError(
+                f"config field {field_name!r}: refusing {s!r} — values must not "
+                f"start with '-' (would be passed as nmap options)"
+            )
+        out.append(s)
+    return out
+
+
 def load_config(path: str | os.PathLike | None) -> Config:
     data: dict[str, Any] = {}
     if path:
@@ -156,19 +214,23 @@ def load_config(path: str | os.PathLike | None) -> Config:
         if yaml is None:
             raise RuntimeError("PyYAML is required to read config files. pip install pyyaml")
         data = yaml.safe_load(p.read_text()) or {}
+        if not isinstance(data, dict):
+            raise ValueError("config root must be a mapping/object")
 
     cfg = Config(
-        targets=data.get("targets", []) or [],
+        targets=_as_str_list(data.get("targets", []), "targets"),
         scan_profile=data.get("scan_profile", "light"),
-        exclude=data.get("exclude", []) or [],
+        exclude=_as_str_list(data.get("exclude", []), "exclude"),
         nvd_api_key=data.get("nvd_api_key") or os.environ.get("NETSCAN_NVD_API_KEY"),
         vt_api_key=data.get("vt_api_key") or os.environ.get("NETSCAN_VT_API_KEY"),
-        vt_check_host_ips=bool(data.get("vt_check_host_ips", False)),
-        credentialed=bool(data.get("credentialed", False)),
+        vt_check_host_ips=_as_bool(data.get("vt_check_host_ips"), False, "vt_check_host_ips"),
+        credentialed=_as_bool(data.get("credentialed"), False, "credentialed"),
         credentials=_parse_credentials(data.get("credentials", []) or []),
-        strict_host_keys=bool(data.get("strict_host_keys", False)),
-        oval_matching=bool(data.get("oval_matching", True)),
-        msrc_matching=bool(data.get("msrc_matching", True)),
+        strict_host_keys=_as_bool(
+            data.get("strict_host_keys"), True, "strict_host_keys"
+        ),
+        oval_matching=_as_bool(data.get("oval_matching"), True, "oval_matching"),
+        msrc_matching=_as_bool(data.get("msrc_matching"), True, "msrc_matching"),
         msrc_months=int(data.get("msrc_months", 3)),
         msrc_api_key=data.get("msrc_api_key") or os.environ.get("NETSCAN_MSRC_API_KEY"),
         db_path=data.get("db_path", "netscan.db"),
@@ -183,9 +245,15 @@ def load_config(path: str | os.PathLike | None) -> Config:
     return cfg
 
 
-def _parse_credentials(items: list[dict]) -> list[Credential]:
+def _parse_credentials(items: Any) -> list[Credential]:
+    if not items:
+        return []
+    if not isinstance(items, list):
+        raise ValueError("config field 'credentials': expected a list")
     creds: list[Credential] = []
     for it in items:
+        if not isinstance(it, dict):
+            raise ValueError("each credentials entry must be a mapping")
         ctype = it.get("type")
         if ctype not in ("ssh", "winrm"):
             raise ValueError(f"credential {it.get('name')!r}: type must be ssh or winrm")
@@ -193,14 +261,24 @@ def _parse_credentials(items: list[dict]) -> list[Credential]:
         password = it.get("password")
         if not password and it.get("password_env"):
             password = os.environ.get(it["password_env"])
+        key_file = it.get("key_file")
+        if key_file:
+            key_file = os.path.expanduser(str(key_file))
+        match = it.get("match", []) or []
+        if isinstance(match, str):
+            match = [match]
+        if not isinstance(match, list):
+            raise ValueError(
+                f"credential {it.get('name')!r}: match must be a list of strings"
+            )
         creds.append(Credential(
             name=it.get("name", ctype),
             type=ctype,
             username=it.get("username", ""),
             password=password,
-            key_file=it.get("key_file"),
+            key_file=key_file,
             port=it.get("port"),
             scheme=it.get("scheme", "https"),
-            match=it.get("match", []) or [],
+            match=[str(m) for m in match],
         ))
     return creds

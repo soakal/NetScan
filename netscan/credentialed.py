@@ -40,10 +40,9 @@ except ImportError:
 
 
 # One-time (per process) warning when scanning with unverified host identity.
-# Default mode accepts unknown SSH host keys / self-signed WinRM certs so that a
-# first scan of a fleet works without a pre-populated known_hosts — a documented
-# tradeoff for an internal scanner. `strict_host_keys: true` opts into strict
-# verification (SSH: reject unknown keys; WinRM: validate the TLS certificate).
+# Default is strict verification. `strict_host_keys: false` opts into accepting
+# unknown SSH host keys / self-signed WinRM certs so a first lab scan works
+# without a pre-populated known_hosts — a documented tradeoff.
 _warned_unverified = False
 
 
@@ -52,11 +51,11 @@ def _warn_unverified_once() -> None:
     if not _warned_unverified:
         _warned_unverified = True
         print(
-            "[credentialed] WARNING: host identity is NOT verified in this mode "
-            "(SSH host keys auto-accepted, WinRM TLS certs not validated). A "
-            "MITM on the scan path could capture the scan credential. Set "
-            "`strict_host_keys: true` in config.yaml (with a populated "
-            "~/.ssh/known_hosts and trusted WinRM certs) to enforce verification.",
+            "[credentialed] WARNING: host identity is NOT verified "
+            "(strict_host_keys: false — SSH host keys auto-accepted, WinRM TLS "
+            "certs not validated). A MITM on the scan path could capture the "
+            "scan credential. Prefer the default strict_host_keys: true with a "
+            "populated ~/.ssh/known_hosts and trusted WinRM certs.",
             file=sys.stderr,
         )
 
@@ -295,7 +294,7 @@ _SSH_RPM_CMD = "rpm -qa --qf '%{NAME} %{VERSION}\\n' 2>/dev/null"
 
 
 def scan_ssh(host: dict, cred: Credential, timeout: float = 12.0,
-             strict_host_keys: bool = False) -> CredResult:
+             strict_host_keys: bool = True) -> CredResult:
     res = CredResult(auth_method="ssh")
     if not _HAVE_PARAMIKO:
         res.error = "paramiko not installed (pip install paramiko)"
@@ -303,12 +302,12 @@ def scan_ssh(host: dict, cred: Credential, timeout: float = 12.0,
     ip = host["ip"]
     client = paramiko.SSHClient()
     if strict_host_keys:
-        # Strict: only hosts whose key is already in the system/user known_hosts
-        # are accepted; anything unknown (or changed) fails the scan of that host.
+        # Strict (default): only hosts whose key is already in known_hosts
+        # are accepted; anything unknown (or changed) fails that host.
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
-        # Default: accept unknown keys so a first scan of a new fleet works.
+        # Opt-out: accept unknown keys for a first lab scan of a new fleet.
         # See _warn_unverified_once for the tradeoff.
         _warn_unverified_once()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -370,7 +369,7 @@ _PS_SOFTWARE = (
 
 
 def scan_winrm(host: dict, cred: Credential, timeout: float = 25.0,
-               strict_host_keys: bool = False) -> CredResult:
+               strict_host_keys: bool = True) -> CredResult:
     res = CredResult(auth_method="winrm")
     if not _HAVE_WINRM:
         res.error = "pywinrm not installed (pip install pywinrm)"
@@ -384,9 +383,8 @@ def scan_winrm(host: dict, cred: Credential, timeout: float = 25.0,
             endpoint,
             auth=(cred.username, cred.password),
             transport="ntlm",
-            # Default "ignore": internal hosts are often self-signed and a first
-            # scan must work without cert provisioning. strict_host_keys opts
-            # into full certificate validation.
+            # Default "validate": require a trusted TLS cert. Opt out with
+            # strict_host_keys: false for self-signed lab endpoints.
             server_cert_validation="validate" if strict_host_keys else "ignore",
         )
     except Exception as e:
@@ -415,7 +413,7 @@ def scan_winrm(host: dict, cred: Credential, timeout: float = 25.0,
 
 
 def scan_host(host: dict, cred: Credential,
-              strict_host_keys: bool = False) -> CredResult:
+              strict_host_keys: bool = True) -> CredResult:
     if cred.type == "ssh":
         return scan_ssh(host, cred, strict_host_keys=strict_host_keys)
     if cred.type == "winrm":

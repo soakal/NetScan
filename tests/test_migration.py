@@ -148,5 +148,34 @@ def test_migration_adds_finding_lifecycle_without_data_loss(tmp_path):
         assert _row_count(db._conn, "scans") == pre_scans
         assert _row_count(db._conn, "hosts") == pre_hosts
         assert _row_count(db._conn, "findings") == pre_findings
+
+        # (c) columns the report / write path need were added to the narrow
+        # old findings table (CREATE TABLE IF NOT EXISTS does not alter it).
+        finding_cols = {r["name"] for r in db._conn.execute(
+            "PRAGMA table_info(findings)").fetchall()}
+        for needed in ("cvss", "summary", "refs", "ransomware", "epss",
+                       "priority", "source", "cwe", "owasp_key"):
+            assert needed in finding_cols, f"missing migrated column {needed}"
+
+        # (d) normal writes + report queries work after migration.
+        scan_id = db.create_scan("light", ["10.0.0.1"])
+        host_id = db.add_host(scan_id, {
+            "host_key": "aa:bb:cc", "ip": "10.0.0.1", "mac": "aa:bb:cc",
+            "hostname": None, "vendor": None, "os_name": None,
+            "os_accuracy": None, "os_build": None, "device_type": None,
+            "auth_method": "network", "vt_malicious": 0,
+        })
+        db.add_finding(scan_id, host_id, "aa:bb:cc", {
+            "cve_id": "CVE-2024-9999", "port": 443, "service": "https",
+            "product": "x", "version": "1", "cpe": None, "cvss": 9.8,
+            "severity": "Critical", "is_kev": False, "ransomware": False,
+            "epss": 0.1, "epss_pct": 0.5, "cwe": "CWE-79", "cwe_name": "XSS",
+            "owasp_key": "A03", "owasp_name": "Injection", "priority": 50,
+            "summary": "test", "remediation": ["patch"], "refs": ["https://example"],
+            "source": "network",
+        }, "NEW")
+        db.finish_scan(scan_id, host_count=1, finding_count=1)
+        grouped = db.findings_grouped_by_cve(scan_id)
+        assert any(r["cve_id"] == "CVE-2024-9999" for r in grouped)
     finally:
         db.close()

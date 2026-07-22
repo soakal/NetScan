@@ -8,6 +8,8 @@ from netscan import credentialed
 def test_config_default_and_parse(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("targets: []\n")
+    assert load_config(str(p)).strict_host_keys is True
+    p.write_text("targets: []\nstrict_host_keys: false\n")
     assert load_config(str(p)).strict_host_keys is False
     p.write_text("targets: []\nstrict_host_keys: true\n")
     assert load_config(str(p)).strict_host_keys is True

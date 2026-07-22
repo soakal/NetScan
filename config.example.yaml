@@ -42,16 +42,14 @@ vt_check_host_ips: false   # set true to look up each live host IP on VirusTotal
 # this file out of version control (chmod 600). Use a dedicated read-only
 # service account, not a domain admin.
 #
-# Host identity: by default the scanner ACCEPTS unknown SSH host keys and does
-# NOT validate WinRM TLS certificates, so a first scan of a new fleet works
-# without pre-provisioned known_hosts/certs. The tradeoff: an attacker in a
-# man-in-the-middle position on the scan path could impersonate a host and
-# capture the scan credential. Once your hosts' SSH keys are in
-# ~/.ssh/known_hosts and your WinRM endpoints have trusted certificates, set
-# strict_host_keys: true to enforce verification (unknown/changed hosts then
-# fail their credentialed scan instead of being trusted).
+# Host identity: credentialed scans VERIFY SSH host keys and WinRM TLS
+# certificates by default (strict_host_keys: true). Unknown/changed hosts fail
+# their credentialed scan instead of being trusted. For a first lab scan when
+# known_hosts/certs are not provisioned yet, set strict_host_keys: false — but
+# know that mode auto-accepts SSH keys and skips WinRM TLS validation, so a
+# MITM on the scan path could capture the scan credential.
 credentialed: false
-strict_host_keys: false
+strict_host_keys: true
 credentials:
   # - name: linux-fleet
   #   type: ssh

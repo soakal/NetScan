@@ -70,6 +70,12 @@ if errorlevel 1 goto menu
 echo.
 echo Running scan...
 python run.py scan -c config.yaml
+if errorlevel 1 (
+    echo.
+    echo Scan failed. Not starting the report server.
+    pause
+    goto menu
+)
 echo.
 echo Starting report server at http://127.0.0.1:8000
 echo Press Ctrl+C to stop.

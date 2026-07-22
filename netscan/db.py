@@ -151,17 +151,87 @@ class Database:
 
     def _migrate(self) -> None:
         """Add columns introduced after a DB was first created. Safe to run
-        every startup; only adds what's missing."""
+        every startup; only adds what's missing.
+
+        CREATE TABLE IF NOT EXISTS does not alter existing tables, so every
+        column the current code reads/writes must be listed here (except the
+        original primary key). Otherwise an older DB opens cleanly and then
+        crashes on report queries (e.g. missing findings.cvss).
+        """
         wanted = {
-            "scans": [("hosts_attempted", "INTEGER"), ("hosts_failed", "INTEGER")],
-            "hosts": [("os_build", "TEXT"), ("auth_method", "TEXT DEFAULT 'network'")],
-            "services": [("source", "TEXT DEFAULT 'network'")],
-            "findings": [("source", "TEXT DEFAULT 'network'")],
-            "finding_lifecycle": [("recurred_at", "REAL")],
+            "scans": [
+                ("finished_at", "REAL"),
+                ("profile", "TEXT"),
+                ("targets", "TEXT"),
+                ("host_count", "INTEGER DEFAULT 0"),
+                ("hosts_attempted", "INTEGER"),
+                ("hosts_failed", "INTEGER"),
+                ("finding_count", "INTEGER DEFAULT 0"),
+            ],
+            "hosts": [
+                ("mac", "TEXT"),
+                ("hostname", "TEXT"),
+                ("vendor", "TEXT"),
+                ("os_name", "TEXT"),
+                ("os_accuracy", "INTEGER"),
+                ("os_build", "TEXT"),
+                ("device_type", "TEXT"),
+                ("auth_method", "TEXT DEFAULT 'network'"),
+                ("risk_score", "REAL DEFAULT 0"),
+                ("vt_malicious", "INTEGER DEFAULT 0"),
+            ],
+            "services": [
+                ("proto", "TEXT"),
+                ("state", "TEXT"),
+                ("service", "TEXT"),
+                ("product", "TEXT"),
+                ("version", "TEXT"),
+                ("cpe", "TEXT"),
+                ("source", "TEXT DEFAULT 'network'"),
+            ],
+            "findings": [
+                ("service", "TEXT"),
+                ("product", "TEXT"),
+                ("version", "TEXT"),
+                ("cpe", "TEXT"),
+                ("cvss", "REAL"),
+                ("severity", "TEXT"),
+                ("is_kev", "INTEGER DEFAULT 0"),
+                ("ransomware", "INTEGER DEFAULT 0"),
+                ("epss", "REAL DEFAULT 0"),
+                ("epss_pct", "REAL DEFAULT 0"),
+                ("cwe", "TEXT"),
+                ("cwe_name", "TEXT"),
+                ("owasp_key", "TEXT"),
+                ("owasp_name", "TEXT"),
+                ("priority", "REAL DEFAULT 0"),
+                ("summary", "TEXT"),
+                ("remediation", "TEXT"),
+                ("refs", "TEXT"),
+                ("source", "TEXT DEFAULT 'network'"),
+                ("status", "TEXT DEFAULT 'NEW'"),
+            ],
+            "resolved_findings": [
+                ("ip", "TEXT"),
+                ("port", "INTEGER"),
+                ("severity", "TEXT"),
+                ("is_kev", "INTEGER DEFAULT 0"),
+                ("resolved_at", "REAL"),
+            ],
+            "finding_lifecycle": [
+                ("first_seen", "REAL"),
+                ("last_seen", "REAL"),
+                ("resolved_at", "REAL"),
+                ("recurred", "INTEGER DEFAULT 0"),
+                ("recurred_at", "REAL"),
+            ],
         }
         for table, cols in wanted.items():
-            existing = {r["name"] for r in self._conn.execute(
-                f"PRAGMA table_info({table})").fetchall()}
+            existing_rows = self._conn.execute(
+                f"PRAGMA table_info({table})").fetchall()
+            if not existing_rows:
+                continue  # table created by SCHEMA this startup
+            existing = {r["name"] for r in existing_rows}
             for name, decl in cols:
                 if name not in existing:
                     self._conn.execute(
@@ -337,6 +407,19 @@ class Database:
                    WHERE host_key=? AND cve_id=? AND port=? AND resolved_at IS NULL""",
                 [(ts, r["host_key"], r["cve_id"], r.get("port") or 0) for r in rows],
             )
+
+    def open_lifecycle_findings(self) -> list[dict]:
+        """Return still-open (unresolved) lifecycle rows.
+
+        Used so a finding can be resolved when its host returns after being
+        offline: comparing only to the immediately previous scan misses that
+        case when the intervening scan saw the host down (and therefore had no
+        prior finding row to resolve against).
+        """
+        return [dict(r) for r in self._conn.execute(
+            """SELECT host_key, cve_id, port FROM finding_lifecycle
+               WHERE resolved_at IS NULL"""
+        ).fetchall()]
 
     # ---- read path ----------------------------------------------------
 

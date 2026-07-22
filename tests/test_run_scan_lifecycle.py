@@ -20,6 +20,8 @@ test_run_scan_host_down_does_not_resolve_findings for why):
 """
 from __future__ import annotations
 
+import pytest
+
 import netscan.correlate as correlate
 from netscan.config import Config
 
@@ -191,3 +193,65 @@ def test_run_scan_host_down_does_not_resolve_findings(tmp_path, monkeypatch):
     assert row3 is not None
     assert row3["resolved_at"] is None              # never resolved, so no false "recurrence"
     assert row3["recurred"] == 0                    # critically: NOT flagged as recurring
+
+
+def test_run_scan_host_down_then_return_patched_resolves(tmp_path, monkeypatch):
+    """Host down in one scan must not resolve; when it returns without the
+    vulnerable service, the still-open lifecycle row must resolve.
+
+    Regression: resolving only against the immediately previous scan missed
+    this case because the intervening down-scan had no finding row.
+    """
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+
+    cfg = _make_cfg(tmp_path)
+
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [_host()])
+    correlate.run_scan(cfg)
+    assert _lifecycle_row(cfg)["resolved_at"] is None
+
+    monkeypatch.setattr(correlate, "discover_and_fingerprint", lambda cfg: [])
+    correlate.run_scan(cfg)
+    assert _lifecycle_row(cfg)["resolved_at"] is None
+
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint",
+        lambda cfg: [_host(vulnerable=False)],
+    )
+    correlate.run_scan(cfg)
+    row = _lifecycle_row(cfg)
+    assert row is not None
+    assert row["resolved_at"] is not None
+    assert row["recurred"] == 0
+
+
+def test_run_scan_finalizes_on_failure(tmp_path, monkeypatch):
+    """A crash after create_scan must still finish the scan row and close the DB."""
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint",
+        lambda cfg: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    cfg = _make_cfg(tmp_path)
+    with pytest.raises(RuntimeError, match="boom"):
+        correlate.run_scan(cfg)
+
+    from netscan.db import Database
+    db = Database(cfg.db_path)
+    try:
+        row = db._conn.execute(
+            "SELECT id, finished_at, host_count, finding_count FROM scans"
+        ).fetchone()
+        assert row is not None
+        assert row["finished_at"] is not None
+        assert row["host_count"] == 0
+        assert row["finding_count"] == 0
+    finally:
+        db.close()

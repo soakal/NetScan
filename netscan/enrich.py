@@ -138,7 +138,11 @@ class NvdClient:
         self._last_request = time.time()
 
     def cves_for_cpe(self, cpe23: str) -> list[dict]:
-        """Return normalized CVE findings affecting a given CPE (with version)."""
+        """Return normalized CVE findings affecting a given CPE (with version).
+
+        Walks every NVD results page (200 per page) so CPEs with large CVE sets
+        are not silently truncated after the first page.
+        """
         cached = self.cache.get("nvd", cpe23, self.max_age_hours)
         if cached is not None:
             return cached
@@ -146,22 +150,39 @@ class NvdClient:
         headers = {"User-Agent": USER_AGENT}
         if self.api_key:
             headers["apiKey"] = self.api_key
-        params = {"cpeName": cpe23, "resultsPerPage": 200}
 
-        self._throttle()
+        findings: list[dict] = []
+        start_index = 0
+        results_per_page = 200
         try:
-            resp = requests.get(NVD_API_URL, headers=headers, params=params, timeout=40)
-            if resp.status_code == 404:
-                self.cache.put("nvd", cpe23, [])
-                return []
-            resp.raise_for_status()
-            payload = resp.json()
+            while True:
+                params = {
+                    "cpeName": cpe23,
+                    "resultsPerPage": results_per_page,
+                    "startIndex": start_index,
+                }
+                self._throttle()
+                resp = requests.get(
+                    NVD_API_URL, headers=headers, params=params, timeout=40
+                )
+                if resp.status_code == 404:
+                    self.cache.put("nvd", cpe23, [])
+                    return []
+                resp.raise_for_status()
+                payload = resp.json()
+                batch = payload.get("vulnerabilities", []) or []
+                for item in batch:
+                    f = self._normalize(item)
+                    if f:
+                        findings.append(f)
+                total = int(payload.get("totalResults") or 0)
+                start_index += len(batch)
+                if not batch or start_index >= total:
+                    break
         except (requests.RequestException, ValueError) as e:
             print(f"[nvd] lookup failed for {cpe23}: {e}", file=sys.stderr)
             return []  # don't cache transient failures
 
-        findings = [self._normalize(item) for item in payload.get("vulnerabilities", [])]
-        findings = [f for f in findings if f]
         self.cache.put("nvd", cpe23, findings)
         return findings
 
