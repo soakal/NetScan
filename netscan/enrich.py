@@ -118,13 +118,27 @@ def _version_key(v: str) -> list[tuple[int, Any]]:
     return [(0, int(t)) if t.isdigit() else (1, t.lower()) for t in tokens]
 
 
-def _compare_versions(a: str, b: str) -> int:
+def _version_relation(a: str, b: str) -> str:
+    """Compare two version strings component-by-component and return
+    'lt' | 'eq' | 'gt' | 'ambiguous'.
+
+    'ambiguous' covers the case nmap hands us constantly: a truncated
+    version like "4" for an install that's actually "4.22.10". Naively
+    treating "4" as "4.0.0" would make it compare as *less than* "4.6.4"
+    (Python list/tuple comparison: a shorter sequence that's a prefix of a
+    longer one sorts before it) -- which is wrong; "4" carries no
+    information about the minor/patch, so relative to any bound sharing
+    that same leading digit, it truly could be either side. We only get a
+    confident lt/gt when the two versions diverge within the components
+    both actually specify.
+    """
     ka, kb = _version_key(a), _version_key(b)
-    if ka < kb:
-        return -1
-    if ka > kb:
-        return 1
-    return 0
+    n = min(len(ka), len(kb))
+    if ka[:n] != kb[:n]:
+        return "lt" if ka[:n] < kb[:n] else "gt"
+    if len(ka) == len(kb):
+        return "eq"
+    return "ambiguous"
 
 
 def _matching_cpe_matches(cve: dict, cpe23: str) -> list[dict]:
@@ -162,30 +176,47 @@ def version_covers(detected_version: str | None, constraints: list[dict]) -> boo
     constraints NVD reports for this CVE/CPE pairing?
 
     Returns True (affected), False (definitively out of range -- safe to drop
-    the finding), or None (can't tell: no detected version, or NVD gave us no
-    constraint data to check against -- keep the finding but flag it as
+    the finding), or None (can't tell -- keep the finding but flag it as
     unverified rather than silently dropping or silently trusting it).
+    None covers two distinct cases: no detected version / no constraint data
+    at all, and the more common one in practice -- nmap only resolved a
+    truncated version (e.g. "4" instead of "4.22.10") that's too coarse to
+    confidently place on one side of a range boundary (see _version_relation).
     """
     if not detected_version or not constraints:
         return None
+    ambiguous = False
     for c in constraints:
         version = c.get("version")
         if version and version not in ("*", "-"):
-            if _compare_versions(detected_version, version) == 0:
+            rel = _version_relation(detected_version, version)
+            if rel == "eq":
                 return True
+            if rel == "ambiguous":
+                ambiguous = True
             continue
-        ok = True
-        if c.get("start_incl") and _compare_versions(detected_version, c["start_incl"]) < 0:
-            ok = False
-        if c.get("start_excl") and _compare_versions(detected_version, c["start_excl"]) <= 0:
-            ok = False
-        if c.get("end_incl") and _compare_versions(detected_version, c["end_incl"]) > 0:
-            ok = False
-        if c.get("end_excl") and _compare_versions(detected_version, c["end_excl"]) >= 0:
-            ok = False
+
+        bound_checks = (
+            (c.get("start_incl"), lambda rel: rel == "lt"),
+            (c.get("start_excl"), lambda rel: rel in ("lt", "eq")),
+            (c.get("end_incl"), lambda rel: rel == "gt"),
+            (c.get("end_excl"), lambda rel: rel in ("gt", "eq")),
+        )
+        ok, bounds_ambiguous = True, False
+        for bound, excluded_if in bound_checks:
+            if not bound:
+                continue
+            rel = _version_relation(detected_version, bound)
+            if rel == "ambiguous":
+                bounds_ambiguous = True
+            elif excluded_if(rel):
+                ok = False
+        if bounds_ambiguous:
+            ambiguous = True
+            continue
         if ok:
             return True
-    return False
+    return None if ambiguous else False
 
 
 def _severity_from_cvss(score: float | None) -> str:
