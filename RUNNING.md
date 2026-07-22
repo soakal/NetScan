@@ -1,74 +1,70 @@
 # Running NetScan
 
-## Easiest way — `run.bat` (Windows) / `run.sh` (Linux/macOS)
+Pick your OS. Each section is self-contained: install, then run.
 
-**Windows:** double-click `run.bat` in this folder.
-**Linux/macOS:** run `./run.sh` from a terminal in this folder (make it
-executable once with `chmod +x run.sh` if needed).
+---
 
-Both give you the same menu:
+## Windows
 
-```
-1. Scan your network
-2. Serve the report (http://127.0.0.1:8000)
-3. Scan, then serve the report
-4. Demo mode (no network needed, sample data)
-5. List scan profiles
-0. Exit
-```
+### Install
 
-- **Option 3** is the normal path: scan, then immediately view results.
-- If `config.yaml` is missing, it's auto-created from `config.example.yaml` and
-  the script pauses so you can edit your real targets before scanning.
-- Press `Ctrl+C` to stop the report server (options 2/3/4) and return to the
-  menu.
-- On Linux/macOS, `run.sh` warns (but doesn't force) if you're not root —
-  `sudo ./run.sh` gives nmap SYN scan + OS detection, which needs elevated
-  privileges to work accurately.
+1. **Get the code** — clone or copy this repository onto the machine, then open that folder.
+2. **Install Python 3.11+** from https://www.python.org/downloads/  
+   During setup, check **“Add python.exe to PATH”**.
+3. **Install nmap** (recommended, for accurate OS/service detection):
+   ```bat
+   winget install Insecure.Nmap
+   ```
+   Or download from https://nmap.org/download.html
+4. **Install the Python dependencies** (from a Command Prompt or PowerShell in this folder):
+   ```bat
+   python -m pip install -r requirements.txt
+   ```
+   If you skip this, `run.bat` will detect the missing package at startup,
+   explain why it's needed, and prompt before installing it.
+5. **Create your config**:
+   ```bat
+   copy config.example.yaml config.yaml
+   notepad config.yaml
+   ```
+   Set `targets:` to hosts/subnets you are authorized to scan.
 
-## Manual way (command line)
+### Run
 
-From this folder:
+1. Double-click **`run.bat`** in this folder.
+2. Choose from the menu:
+   ```
+   1. Scan your network
+   2. Serve the report (http://127.0.0.1:8000)
+   3. Scan, then serve the report
+   4. Demo mode (no network needed, sample data)
+   5. List scan profiles
+   0. Exit
+   ```
+3. **Option 3** is the normal path: scan, then open http://127.0.0.1:8000 in a browser.
+4. Press `Ctrl+C` in the console to stop the report server (options 2/3/4) and return to the menu.
 
-```bash
-# scan your network
+**Manual commands** (Command Prompt / PowerShell in this folder):
+
+```bat
 python run.py scan -c config.yaml
-
-# view the report at http://127.0.0.1:8000
 python run.py serve -c config.yaml
-```
-
-Try it with no real network scan first:
-
-```bash
 python run.py demo
-python run.py serve
-```
-
-List available scan profiles (`light` / `standard` / `thorough`):
-
-```bash
 python run.py profiles
 ```
 
-## Setup requirements
+**Re-scans:** use Task Scheduler, or just re-run `run.bat` → option 1 or 3. Each run is its own record; the **Scans** view shows what opened, closed, or recurred.
 
-- Python 3.11+ with the dependencies installed: Flask, PyYAML, requests,
-  pytest, `python-nmap`, and optionally `paramiko`/`pywinrm` (for
-  credentialed scanning) — `pip install -r requirements.txt`.
-- nmap (e.g. `winget install Insecure.Nmap` on Windows, or your distro's
-  package) — gives accurate OS/service detection. Without it, NetScan falls
-  back to a pure-Python scanner (still works, just less precise).
-- Your own `config.yaml` (copied from `config.example.yaml`) with the
-  subnets/hosts you are authorized to scan under `targets:`. It is
-  gitignored — it holds your real network targets and stays local; keep
-  machine-specific details there, not in tracked files.
-- Sanity check: `python -m pytest -q` should pass cleanly.
+---
 
-## Installing on Linux
+## Linux
 
-1. **Get the code** — clone or copy this repository onto the machine, e.g.
-   `git clone <repo-url> netscan && cd netscan`.
+### Install
+
+1. **Get the code**:
+   ```bash
+   git clone <repo-url> netscan && cd netscan
+   ```
 2. **Install Python 3.11+** if it isn't already present:
    ```bash
    sudo apt install python3 python3-pip   # Debian/Ubuntu
@@ -96,24 +92,42 @@ python run.py profiles
    cp config.example.yaml config.yaml
    $EDITOR config.yaml   # set targets: to hosts/subnets you're authorized to scan
    ```
-7. **Run it**: `sudo ./run.sh` → option 3 (scan, then serve), then open
-   http://127.0.0.1:8000. `sudo` is recommended (not required) so nmap can do
-   a SYN scan and OS fingerprinting; without it, NetScan still runs, just with
-   less accurate detection.
-8. **Automate re-scans** with a cron job or systemd timer, e.g. a crontab
-   entry running `python3 run.py scan -c config.yaml` nightly — each run is
-   its own record, and the **Scans** view in the report shows what opened,
-   closed, or recurred between runs.
 
-## First run checklist
+### Run
 
-1. Open `config.yaml` and confirm the `targets:` list is what you actually
-   want scanned. Add anything under `exclude:` you want skipped (e.g. fragile
-   devices, the scanner host itself).
-2. Run `run.bat` (Windows) or `./run.sh` (Linux/macOS) → option 3 (scan, then
-   serve), or the manual commands above.
-3. Open http://127.0.0.1:8000 in a browser once the server starts.
-4. Re-run a scan later (cron/systemd timer on Linux, Task Scheduler on
-   Windows, or just re-run the launcher) — each scan is its own record, and
-   the **Scans** view will show what opened, closed, or recurred between
-   runs.
+1. Start the launcher (sudo recommended so nmap can do SYN scan + OS detection):
+   ```bash
+   sudo ./run.sh
+   ```
+   Without sudo it still runs, with less accurate detection.
+2. Choose from the menu:
+   ```
+   1. Scan your network
+   2. Serve the report (http://127.0.0.1:8000)
+   3. Scan, then serve the report
+   4. Demo mode (no network needed, sample data)
+   5. List scan profiles
+   0. Exit
+   ```
+3. **Option 3** is the normal path: scan, then open http://127.0.0.1:8000 in a browser.
+4. Press `Ctrl+C` to stop the report server (options 2/3/4) and return to the menu.
+
+**Manual commands** (from this folder):
+
+```bash
+sudo python3 run.py scan -c config.yaml
+python3 run.py serve -c config.yaml
+python3 run.py demo
+python3 run.py profiles
+```
+
+**Re-scans:** cron or a systemd timer running `python3 run.py scan -c config.yaml` nightly, or re-run `./run.sh` → option 1 or 3. Each run is its own record; the **Scans** view shows what opened, closed, or recurred.
+
+---
+
+## Notes (both platforms)
+
+- `config.yaml` is gitignored — it holds your real targets and stays local.
+- Without nmap, NetScan falls back to a pure-Python scanner (still works, less precise).
+- Sanity check: `python -m pytest -q` (Windows) or `python3 -m pytest -q` (Linux) should pass.
+- Get a free **NVD API key** (raises the rate limit 10×): https://nvd.nist.gov/developers/request-an-api-key

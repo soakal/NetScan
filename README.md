@@ -145,68 +145,32 @@ a substitute.
 
 ---
 
-## Install
+## Install & run
 
-```bash
-python3 -m pip install -r requirements.txt
+Full cut-and-dry walkthroughs (install + run) live in **[RUNNING.md](RUNNING.md)**:
 
-# Recommended: install the nmap binary for OS detection + CPE-based CVE matching
-sudo apt install nmap        # Debian/Ubuntu
-# sudo dnf install nmap      # RHEL/Fedora
-# brew install nmap          # macOS
-# winget install Insecure.Nmap   # Windows
-```
+- **[Windows](RUNNING.md#windows)** — Python, nmap via `winget`, `run.bat`
+- **[Linux](RUNNING.md#linux)** — apt/dnf/pacman, `run.sh`
 
-See [RUNNING.md](RUNNING.md) for a fuller setup walkthrough, including the
-double-click `run.bat` launcher on Windows and the `run.sh` equivalent on
-Linux/macOS.
+Short version:
 
-If you skip this step, NetScan detects a missing Python dependency at
-startup, explains what it is and why it's needed, shows the exact
-`pip install` command, and asks before running it (never silently — a
-security tool installing software without asking would be a red flag in
-itself). Pass `--auto-install` to skip the prompt for scripted/unattended
-runs. This only ever covers Python packages from `requirements.txt`; nmap
-itself is never auto-installed (see the warning `scan` prints if it's
-missing, which includes the right install command for your OS).
+| | Windows | Linux |
+|---|---|---|
+| Deps | `python -m pip install -r requirements.txt` | `python3 -m pip install -r requirements.txt` |
+| nmap | `winget install Insecure.Nmap` | `sudo apt install nmap` (or dnf/pacman) |
+| Config | `copy config.example.yaml config.yaml` | `cp config.example.yaml config.yaml` |
+| Launch | double-click `run.bat` → option **3** | `chmod +x run.sh` once, then `sudo ./run.sh` → option **3** |
+| Report | http://127.0.0.1:8000 | http://127.0.0.1:8000 |
 
-Get a free **NVD API key** (raises the rate limit 10x — strongly recommended for
-anything bigger than a handful of hosts):
-https://nvd.nist.gov/developers/request-an-api-key
-
-## Configure
-
-```bash
-cp config.example.yaml config.yaml
-$EDITOR config.yaml          # set `targets:` and, ideally, nvd_api_key
-```
+If you skip the pip step, NetScan detects a missing Python dependency at
+startup, shows the exact `pip install` command, and asks before running it
+(never silently). Pass `--auto-install` to skip the prompt for
+scripted/unattended runs. This only covers packages from `requirements.txt`;
+nmap is never auto-installed.
 
 Keys can also come from the environment: `NETSCAN_NVD_API_KEY`,
-`NETSCAN_VT_API_KEY`.
-
-## Run
-
-**Windows:** double-click `run.bat` for a menu (scan / serve / demo /
-profiles) instead of typing commands.
-**Linux/macOS:** run `./run.sh` (`chmod +x run.sh` once first) for the same
-menu. See [RUNNING.md](RUNNING.md) for a full install/run walkthrough,
-including a step-by-step Linux install. Everything below also works from a
-terminal on any platform.
-
-```bash
-# 1) scan (root/sudo recommended so nmap can do SYN + OS detection)
-sudo python run.py scan -c config.yaml
-
-# 2) serve the report
-python run.py serve -c config.yaml
-#    -> http://127.0.0.1:8000
-
-# list scan profiles (light / standard / thorough)
-python run.py profiles
-```
-
-Re-run `scan` on a schedule (cron/systemd timer). Each run is a snapshot; the
-report diffs consecutive runs to show what got fixed.
+`NETSCAN_VT_API_KEY`. Get a free **NVD API key** (raises the rate limit 10×):
+https://nvd.nist.gov/developers/request-an-api-key
 
 ### Try the UI with no network
 
