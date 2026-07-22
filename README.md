@@ -203,7 +203,7 @@ data can't get mixed into your real scan history.
 run.py                     CLI: scan / serve / demo / profiles
 run.bat                    Windows double-click launcher (menu over run.py)
 run.sh                     Linux/macOS launcher, same menu as run.bat
-RUNNING.md                 setup/run walkthrough (Windows + Linux install)
+RUNNING.md                 cut-and-dry Windows + Linux install/run sections
 LICENSE                    proprietary, all rights reserved (Copyright VRSI)
 config.example.yaml        copy to config.yaml
 netscan/
