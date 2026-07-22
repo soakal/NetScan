@@ -67,20 +67,23 @@ and by far the most accurate.
   kernel (`uname -r`), and the package list (`dpkg-query`/`rpm -qa`). The OS,
   kernel, and a curated set of well-known packages (OpenSSH, OpenSSL, Apache,
   nginx, …) are mapped to CPEs and correlated against NVD.
-- **WinRM** (Windows, via `pywinrm`): reads the OS caption/build
-  (`Win32_OperatingSystem`), **installed hotfixes** (`Get-HotFix`), and installed
-  software (registry uninstall hives). The hotfix list is shown on the device
-  page so you can confirm a specific KB is present after patching.
+- **WinRM** (Windows, via `pywinrm`): **off by default** (`winrm_enabled: false`)
+  — leave it off if you log into each Windows PC yourself. When enabled, reads
+  the OS caption/build (`Win32_OperatingSystem`), **installed hotfixes**
+  (`Get-HotFix`), and installed software (registry uninstall hives). The hotfix
+  list is shown on the device page so you can confirm a specific KB is present
+  after patching.
 
 Everything run on the target is **read-only**; nothing is changed. Commands used:
 `cat /etc/os-release`, `uname -r`, `dpkg-query -W`/`rpm -qa` over SSH;
 `Get-CimInstance Win32_OperatingSystem`, `Get-HotFix`, and a read of the
-Uninstall registry keys over WinRM.
+Uninstall registry keys over WinRM (only when `winrm_enabled: true`).
 
-Enable it in `config.yaml` (`credentialed: true` + a `credentials:` block) and
-install the optional deps: `pip install paramiko pywinrm`. Use a dedicated
-read-only service account — not a domain admin — and keep the config file out of
-version control.
+Enable SSH inventory in `config.yaml` (`credentialed: true` + an SSH
+`credentials:` entry) and `pip install paramiko`. Use a dedicated read-only
+service account — not a domain admin — and keep the config file out of
+version control. Set `winrm_enabled: true` and `pip install pywinrm` only if
+you want remote Windows inventory.
 
 By default, credentialed scans **verify** host identity (`strict_host_keys: true`
 — SSH known_hosts / WinRM TLS certs required). Unknown or changed hosts fail

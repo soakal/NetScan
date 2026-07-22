@@ -33,23 +33,25 @@ vt_check_host_ips: false   # set true to look up each live host IP on VirusTotal
 
 # --- Credentialed (authenticated) scanning ---
 # Log into hosts you OWN with a least-privilege account and read an accurate
-# software/patch inventory. This is the quietest and most accurate scan mode:
-# it's a normal management login running read-only queries (no exploitation,
-# no changes to the target). Requires paramiko (SSH) and/or pywinrm (WinRM):
-#   pip install paramiko pywinrm
+# software/patch inventory. Quietest + most accurate scan mode: a normal
+# management login running read-only queries (no exploitation, no changes).
+# SSH (Linux/Unix/network gear) needs: pip install paramiko
 #
 # SECURITY: prefer SSH keys or `password_env` over inline passwords, and keep
 # this file out of version control (chmod 600). Use a dedicated read-only
 # service account, not a domain admin.
 #
-# Host identity: credentialed scans VERIFY SSH host keys and WinRM TLS
-# certificates by default (strict_host_keys: true). Unknown/changed hosts fail
-# their credentialed scan instead of being trusted. For a first lab scan when
-# known_hosts/certs are not provisioned yet, set strict_host_keys: false — but
-# know that mode auto-accepts SSH keys and skips WinRM TLS validation, so a
-# MITM on the scan path could capture the scan credential.
+# Host identity: credentialed scans VERIFY SSH host keys by default
+# (strict_host_keys: true). For a first lab scan without known_hosts, set
+# strict_host_keys: false (MITM risk — only for trusted lab networks).
 credentialed: false
 strict_host_keys: true
+
+# WinRM remote Windows inventory. OFF by default — leave it off if you log
+# into each Windows PC yourself. Set true only when you want NetScan to pull
+# OS/hotfix/software inventory over WinRM (also needs: pip install pywinrm).
+winrm_enabled: false
+
 credentials:
   # - name: linux-fleet
   #   type: ssh
@@ -59,6 +61,7 @@ credentials:
   #   port: 22
   #   match: ["192.168.1.0/24"]         # which hosts this cred applies to
   #
+  # WinRM example (only used when winrm_enabled: true):
   # - name: windows-fleet
   #   type: winrm
   #   username: 'SCANDOMAIN\svc-scan'
@@ -67,8 +70,7 @@ credentials:
   #   match: ["192.168.10.0/24"]
   #
   # An empty `match: []` (or omitting it) applies the credential to every host
-  # of that type. The first matching credential wins; SSH is tried for *nix
-  # fingerprints and WinRM for Windows when both could match.
+  # of that type. The first matching credential wins.
 
 # --- Accurate credentialed matching backends ---
 # OVAL: use distro security feeds (Ubuntu/Debian/RHEL family) to assess Linux
@@ -76,8 +78,8 @@ credentials:
 #       distro's *fixed* version, eliminating the false positives you get from
 #       generic version/CPE matching. No key needed.
 oval_matching: true
-# MSRC: use Microsoft's CVE->KB data to turn a Windows host's installed-hotfix
-#       list into "missing patch" findings, with cumulative-update supersedence.
+# MSRC: Microsoft CVE->KB missing-patch detection. Only used when WinRM
+#       inventory is enabled (winrm_enabled: true) and a WinRM credential exists.
 msrc_matching: true
 msrc_months: 3            # how many recent patch-Tuesday months to pull/correlate
 msrc_api_key: null        # optional; env var NETSCAN_MSRC_API_KEY

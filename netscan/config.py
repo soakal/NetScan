@@ -10,6 +10,7 @@ have to commit them:
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -115,11 +116,15 @@ class Config:
     # accurate software/patch inventory. Quietest + most accurate scan mode.
     credentialed: bool = False
     credentials: list[Credential] = field(default_factory=list)
+    # WinRM remote inventory for Windows. Off by default — leave it off if you
+    # log into each Windows PC yourself. Set true only when you want NetScan to
+    # pull OS/hotfix/software inventory over WinRM with a service account.
+    winrm_enabled: bool = False
     # Verify host identity during credentialed scans. On by default (SSH:
-    # known_hosts required; WinRM: valid TLS cert required). Set false only for
-    # a first lab/fleet scan when you have not provisioned host keys/certs yet —
-    # that mode auto-accepts SSH keys and skips WinRM TLS validation, which a
-    # MITM on the scan path could abuse to capture the scan credential.
+    # known_hosts required; WinRM: valid TLS cert required when winrm_enabled).
+    # Set false only for a first lab/fleet scan when you have not provisioned
+    # host keys/certs yet — that mode auto-accepts SSH keys and skips WinRM TLS
+    # validation, which a MITM on the scan path could abuse to capture creds.
     strict_host_keys: bool = True
 
     # Accurate credentialed matching backends:
@@ -226,6 +231,7 @@ def load_config(path: str | os.PathLike | None) -> Config:
         vt_check_host_ips=_as_bool(data.get("vt_check_host_ips"), False, "vt_check_host_ips"),
         credentialed=_as_bool(data.get("credentialed"), False, "credentialed"),
         credentials=_parse_credentials(data.get("credentials", []) or []),
+        winrm_enabled=_as_bool(data.get("winrm_enabled"), False, "winrm_enabled"),
         strict_host_keys=_as_bool(
             data.get("strict_host_keys"), True, "strict_host_keys"
         ),
@@ -242,6 +248,14 @@ def load_config(path: str | os.PathLike | None) -> Config:
     )
     # Validate profile eagerly.
     _ = cfg.profile
+    if not cfg.winrm_enabled and any(c.type == "winrm" for c in cfg.credentials):
+        # Keep config loadable, but ignore WinRM entries until explicitly enabled.
+        print(
+            "[config] winrm_enabled is false — ignoring WinRM credentials "
+            "(set winrm_enabled: true only if you want remote Windows inventory).",
+            file=sys.stderr,
+        )
+        cfg.credentials = [c for c in cfg.credentials if c.type != "winrm"]
     return cfg
 
 

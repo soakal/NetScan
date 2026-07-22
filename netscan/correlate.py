@@ -119,11 +119,11 @@ def run_scan(cfg: Config) -> int:
             print(f"[scan #{scan_id}] credentialed scanning enabled "
                   f"({cred_mod.deps_status()})", file=sys.stderr)
 
-        # Load MSRC CVE->KB data once (recent patch-Tuesday months) if any WinRM
-        # credential could apply. Cached; empty if offline (we just skip MSRC then).
+        # Load MSRC CVE->KB data once (recent patch-Tuesday months) if WinRM
+        # remote inventory is enabled and a WinRM credential could apply.
         msrc_data = None
-        if cfg.credentialed and cfg.msrc_matching and \
-                any(c.type == "winrm" for c in cfg.credentials):
+        if (cfg.credentialed and cfg.winrm_enabled and cfg.msrc_matching and
+                any(c.type == "winrm" for c in cfg.credentials)):
             from .msrc import MsrcClient
             msrc_data = MsrcClient(cache, cfg.msrc_api_key, cfg.nvd_cache_hours)\
                 .load_recent(cfg.msrc_months)
