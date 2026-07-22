@@ -5,6 +5,7 @@ PyYAML>=6.0
 
 # Scanning engine (recommended). The python-nmap wrapper also needs the nmap
 # binary installed on the system:
+#   Windows:        winget install Insecure.Nmap
 #   Debian/Ubuntu:  sudo apt install nmap
 #   RHEL/Fedora:    sudo dnf install nmap
 #   macOS:          brew install nmap

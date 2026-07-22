@@ -20,7 +20,9 @@ Pick your OS. Each section is self-contained: install, then run.
    ```bat
    python -m pip install -r requirements.txt
    ```
-   If you skip this, `run.bat` will detect the missing package at startup,
+   That pulls in Flask, PyYAML, requests, python-nmap, pytest, and the
+   optional credentialed-scan packages (paramiko, pywinrm).
+   If you skip this, `run.bat` will detect a missing package at startup,
    explain why it's needed, and prompt before installing it.
 5. **Create your config**:
    ```bat
@@ -81,7 +83,9 @@ python run.py profiles
    ```bash
    python3 -m pip install -r requirements.txt
    ```
-   If you skip this, `run.py`/`run.sh` will detect the missing package at
+   That pulls in Flask, PyYAML, requests, python-nmap, pytest, and the
+   optional credentialed-scan packages (paramiko, pywinrm).
+   If you skip this, `run.py`/`run.sh` will detect a missing package at
    startup, explain why it's needed, and prompt before installing it.
 5. **Make the launcher executable** (one-time):
    ```bash
