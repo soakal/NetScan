@@ -156,6 +156,12 @@ def test_migration_adds_finding_lifecycle_without_data_loss(tmp_path):
         for needed in ("cvss", "summary", "refs", "ransomware", "epss",
                        "priority", "source", "cwe", "owasp_key"):
             assert needed in finding_cols, f"missing migrated column {needed}"
+        scan_cols = {r["name"] for r in db._conn.execute(
+            "PRAGMA table_info(scans)").fetchall()}
+        assert {"status", "error"} <= scan_cols
+        assert db._conn.execute(
+            "SELECT status FROM scans WHERE id=1"
+        ).fetchone()["status"] == "SUCCESS"
 
         # (d) normal writes + report queries work after migration.
         scan_id = db.create_scan("light", ["10.0.0.1"])

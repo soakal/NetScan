@@ -67,7 +67,7 @@ credentials:
   #   type: winrm
   #   username: 'SCANDOMAIN\svc-scan'
   #   password_env: NETSCAN_WINRM_PASS
-  #   scheme: https                     # https=5986 (recommended), http=5985
+  #   scheme: https                     # required with strict_host_keys: true
   #   match: ["192.168.10.0/24"]
   #
   # An empty `match: []` (or omitting it) applies the credential to every host

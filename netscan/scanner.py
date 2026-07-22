@@ -20,7 +20,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from .config import Config, FALLBACK_PORTS, MAX_TARGET_HOSTS
+from .config import (
+    Config,
+    FALLBACK_PORTS,
+    MAX_TARGET_HOSTS,
+    validate_target_spec,
+)
 
 try:
     import nmap  # python-nmap
@@ -65,15 +70,43 @@ def cpe22_to_23(cpe: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _validate_host_spec(value: str, field_name: str) -> str:
-    """Reject empty or option-like host specs before they reach nmap argv."""
-    v = (value or "").strip()
-    if not v:
-        raise ValueError(f"{field_name}: empty host specification")
-    if v.startswith("-"):
-        raise ValueError(
-            f"{field_name}: refusing {v!r} — host specs must not start with '-'"
-        )
-    return v
+    """Validate direct Config constructions before values reach nmap."""
+    return validate_target_spec(value, field_name)
+
+
+def _target_count(target: str) -> int:
+    """Return a non-materializing upper bound for one validated target."""
+    target = validate_target_spec(target)
+    if "/" in target:
+        net = ipaddress.ip_network(target, strict=False)
+        if net.version == 4 and net.prefixlen < 31:
+            return max(0, net.num_addresses - 2)
+        return net.num_addresses
+    if "-" in target and target.count(".") == 3:
+        _base, rng = target.rsplit(".", 1)
+        lo, hi = (int(part) for part in rng.split("-", 1))
+        return hi - lo + 1
+    # A single IP or hostname is one target.
+    return 1
+
+
+def _validate_scan_scope(targets: list[str]) -> int:
+    """Reject unsafe host tokens and oversized scans before any backend starts."""
+    total = 0
+    for target in targets:
+        count = _target_count(target)
+        if count > MAX_TARGET_HOSTS:
+            raise ValueError(
+                f"target {target!r} expands to {count} hosts; refusing more "
+                f"than {MAX_TARGET_HOSTS}. Narrow the CIDR or split the scan."
+            )
+        total += count
+        if total > MAX_TARGET_HOSTS:
+            raise ValueError(
+                f"combined targets expand to at least {total} hosts; refusing "
+                f"more than {MAX_TARGET_HOSTS}. Narrow or split the scan."
+            )
+    return total
 
 
 def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
@@ -160,48 +193,28 @@ def _expand_targets(targets: list[str]) -> list[str]:
     typos like 10.0.0.0/8). Hostnames and other unparseable entries are skipped
     with a warning (nmap path still accepts hostnames directly).
     """
+    _validate_scan_scope(targets)
     ips: list[str] = []
     for t in targets:
-        t = t.strip()
-        if t.startswith("-"):
-            raise ValueError(
-                f"refusing target/exclude {t!r} — values must not start with '-'"
-            )
-        try:
-            if "/" in t:
-                net = ipaddress.ip_network(t, strict=False)
-                # .hosts() excludes network/broadcast for IPv4; num_addresses
-                # counts them. Cap on usable hosts.
-                usable = max(0, net.num_addresses - (2 if net.version == 4 and net.prefixlen < 31 else 0))
-                if usable > MAX_TARGET_HOSTS:
-                    raise ValueError(
-                        f"target {t!r} expands to {usable} hosts; "
-                        f"refusing more than {MAX_TARGET_HOSTS}. "
-                        f"Narrow the CIDR or split the scan."
-                    )
-                ips.extend(str(h) for h in net.hosts())
-            elif "-" in t and t.count(".") == 3:
-                # 192.168.1.10-50 style
-                base, rng = t.rsplit(".", 1)
-                lo, hi = rng.split("-")
-                lo_i, hi_i = int(lo), int(hi)
-                if hi_i < lo_i:
-                    raise ValueError(f"invalid range {t!r}")
-                count = hi_i - lo_i + 1
-                if count > MAX_TARGET_HOSTS:
-                    raise ValueError(
-                        f"target {t!r} expands to {count} hosts; "
-                        f"refusing more than {MAX_TARGET_HOSTS}."
-                    )
-                ips.extend(f"{base}.{i}" for i in range(lo_i, hi_i + 1))
-            else:
+        t = validate_target_spec(t)
+        if "/" in t:
+            net = ipaddress.ip_network(t, strict=False)
+            ips.extend(str(h) for h in net.hosts())
+        elif "-" in t and t.count(".") == 3:
+            # 192.168.1.10-50 style
+            base, rng = t.rsplit(".", 1)
+            lo_i, hi_i = (int(part) for part in rng.split("-", 1))
+            ips.extend(f"{base}.{i}" for i in range(lo_i, hi_i + 1))
+        else:
+            try:
                 ips.append(str(ipaddress.ip_address(t)))
-        except ValueError as e:
-            # Re-raise our own size/option errors; skip unparseable hostnames.
-            if "refusing" in str(e) or "expands to" in str(e) or "invalid range" in str(e):
-                raise
-            print(f"[warn] skipping unparseable target {t!r}", file=sys.stderr)
+            except ValueError:
+                # The socket fallback cannot resolve/expand hostnames safely.
+                # nmap accepts these directly.
+                print(f"[warn] fallback scanner cannot expand hostname {t!r}",
+                      file=sys.stderr)
     if len(ips) > MAX_TARGET_HOSTS:
+        # Also protects callers that invoke _expand_targets directly.
         raise ValueError(
             f"combined targets expand to {len(ips)} hosts; "
             f"refusing more than {MAX_TARGET_HOSTS}."
@@ -293,6 +306,9 @@ def _scan_with_sockets(cfg: Config) -> list[dict[str, Any]]:
 
 def discover_and_fingerprint(cfg: Config) -> list[dict[str, Any]]:
     """Return a list of host dicts, each with a `services` list."""
+    _validate_scan_scope(cfg.targets)
+    for excluded in cfg.exclude:
+        _validate_host_spec(excluded, "exclude")
     if nmap_available():
         return _scan_with_nmap(cfg)
     if sys.platform == "win32":

@@ -37,7 +37,9 @@ def create_app(db_path: str) -> Flask:
 
     def _resolve_scan(db: Database) -> int | None:
         sid = request.args.get("scan", type=int)
-        return sid if sid else db.latest_scan_id()
+        if sid:
+            return sid if db.is_successful_scan(sid) else None
+        return db.latest_scan_id()
 
     @app.route("/")
     def dashboard():

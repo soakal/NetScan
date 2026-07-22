@@ -22,9 +22,9 @@ Both give you the same menu:
   the script pauses so you can edit your real targets before scanning.
 - Press `Ctrl+C` to stop the report server (options 2/3/4) and return to the
   menu.
-- On Linux/macOS, `run.sh` warns (but doesn't force) if you're not root —
-  `sudo ./run.sh` gives nmap SYN scan + OS detection, which needs elevated
-  privileges to work accurately.
+- On Linux/macOS, run the launcher as your normal user. If a profile needs
+  privileged nmap features, elevate the **scan command only**:
+  `sudo python3 run.py scan -c config.yaml`. Do not serve the report as root.
 
 ## Manual way (command line)
 
@@ -96,10 +96,11 @@ python run.py profiles
    cp config.example.yaml config.yaml
    $EDITOR config.yaml   # set targets: to hosts/subnets you're authorized to scan
    ```
-7. **Run it**: `sudo ./run.sh` → option 3 (scan, then serve), then open
-   http://127.0.0.1:8000. `sudo` is recommended (not required) so nmap can do
-   a SYN scan and OS fingerprinting; without it, NetScan still runs, just with
-   less accurate detection.
+7. **Run it**: `./run.sh` → option 3 (scan, then serve), then open
+   http://127.0.0.1:8000. For SYN scan / OS fingerprinting, run only the scan
+   with elevation (`sudo python3 run.py scan -c config.yaml`), then serve as
+   your normal user (`python3 run.py serve -c config.yaml`). This also ensures
+   SSH keys and `known_hosts` resolve in the intended user's home directory.
 8. **Automate re-scans** with a cron job or systemd timer, e.g. a crontab
    entry running `python3 run.py scan -c config.yaml` nightly — each run is
    its own record, and the **Scans** view in the report shows what opened,

@@ -29,6 +29,10 @@ EPSS_API_URL = "https://api.first.org/data/v1/epss"
 USER_AGENT = "NetScan/0.1 (+internal vulnerability scanner)"
 
 
+class NvdLookupError(RuntimeError):
+    """The NVD result set was not completely retrieved."""
+
+
 # ---------------------------------------------------------------------------
 # tiny disk cache
 # ---------------------------------------------------------------------------
@@ -181,7 +185,12 @@ class NvdClient:
                     break
         except (requests.RequestException, ValueError) as e:
             print(f"[nvd] lookup failed for {cpe23}: {e}", file=sys.stderr)
-            return []  # don't cache transient failures
+            # An incomplete page set is not equivalent to "this CPE has no
+            # CVEs". Abort the scan so prior findings cannot be falsely
+            # resolved from a transient NVD outage.
+            raise NvdLookupError(
+                f"incomplete NVD lookup for {cpe23}; scan not published"
+            ) from e
 
         self.cache.put("nvd", cpe23, findings)
         return findings

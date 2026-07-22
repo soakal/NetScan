@@ -1,7 +1,10 @@
 """NVD CPE lookup pagination."""
 from __future__ import annotations
 
-from netscan.enrich import Cache, NvdClient
+import pytest
+import requests
+
+from netscan.enrich import Cache, NvdClient, NvdLookupError
 
 
 class _Resp:
@@ -53,3 +56,26 @@ def test_cves_for_cpe_paginates(tmp_path, monkeypatch):
     again = client.cves_for_cpe(cpe)
     assert len(again) == 350
     assert calls == []
+
+
+def test_later_page_failure_is_not_treated_as_empty_or_cached(tmp_path, monkeypatch):
+    cache = Cache(str(tmp_path / "cache"))
+    client = NvdClient(cache, api_key=None, max_age_hours=24)
+    monkeypatch.setattr(client, "_throttle", lambda: None)
+    cpe = "cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*"
+    calls = []
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        start = int(params["startIndex"])
+        calls.append(start)
+        if start == 0:
+            batch = [{"cve": {"id": f"CVE-2099-{i:04d}"}} for i in range(200)]
+            return _Resp(200, {"totalResults": 350, "vulnerabilities": batch})
+        raise requests.ConnectionError("second page unavailable")
+
+    monkeypatch.setattr("netscan.enrich.requests.get", fake_get)
+
+    with pytest.raises(NvdLookupError, match="incomplete NVD lookup"):
+        client.cves_for_cpe(cpe)
+    assert calls == [0, 200]
+    assert cache.get("nvd", cpe, 24) is None

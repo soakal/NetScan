@@ -18,7 +18,9 @@ check_config() {
     fi
     echo
     echo "config.yaml not found. Copying from config.example.yaml..."
-    cp config.example.yaml config.yaml
+    # This file may later contain API keys/passwords; never create it
+    # group/world-readable under a permissive user umask.
+    (umask 077 && cp config.example.yaml config.yaml)
     echo "A default config.yaml was created. Edit it to set your real"
     echo "network targets before scanning, then re-run this option."
     return 1

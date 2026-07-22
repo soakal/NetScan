@@ -10,6 +10,8 @@ have to commit them:
 from __future__ import annotations
 
 import os
+import ipaddress
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,7 +90,7 @@ class Credential:
     name: str
     type: str                       # "ssh" | "winrm"
     username: str
-    password: str | None = None
+    password: str | None = field(default=None, repr=False)
     key_file: str | None = None     # ssh only
     port: int | None = None
     scheme: str = "https"           # winrm: https (5986) or http (5985)
@@ -108,8 +110,8 @@ class Config:
     scan_profile: str = "light"
     exclude: list[str] = field(default_factory=list)
 
-    nvd_api_key: str | None = None
-    vt_api_key: str | None = None
+    nvd_api_key: str | None = field(default=None, repr=False)
+    vt_api_key: str | None = field(default=None, repr=False)
     vt_check_host_ips: bool = False  # off by default: VT IP lookups touch a 3rd party
 
     # Credentialed (authenticated) scanning: log into hosts you own and read an
@@ -133,7 +135,7 @@ class Config:
     oval_matching: bool = True
     msrc_matching: bool = True
     msrc_months: int = 3              # how many recent patch-Tuesday months to pull
-    msrc_api_key: str | None = None
+    msrc_api_key: str | None = field(default=None, repr=False)
 
     db_path: str = "netscan.db"
     cache_dir: str = ".netscan_cache"
@@ -174,6 +176,61 @@ def _as_bool(value: Any, default: bool, field_name: str) -> bool:
     )
 
 
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_IPV4_RANGE = re.compile(
+    r"^(?P<prefix>\d{1,3}\.\d{1,3}\.\d{1,3}\.)(?P<lo>\d{1,3})-(?P<hi>\d{1,3})$"
+)
+
+
+def validate_target_spec(value: str, field_name: str = "targets") -> str:
+    """Validate one nmap host token without permitting embedded arguments.
+
+    Supported forms are a single IP, CIDR, hostname, or the documented
+    abbreviated IPv4 range (192.168.1.10-50). Whitespace, commas, quotes and
+    shell/nmap metacharacters are rejected rather than handed to python-nmap's
+    argument splitter.
+    """
+    value = value.strip()
+    if not value:
+        raise ValueError(f"config field {field_name!r}: empty host specification")
+    if any(ch.isspace() for ch in value) or any(ch in value for ch in "\"'`,;|&"):
+        raise ValueError(
+            f"config field {field_name!r}: {value!r} must be one IP, CIDR, "
+            "IPv4 range, or hostname with no whitespace/options"
+        )
+    if value.startswith("-"):
+        raise ValueError(
+            f"config field {field_name!r}: refusing {value!r} — values must not "
+            "start with '-' (would be passed as nmap options)"
+        )
+
+    try:
+        if "/" in value:
+            ipaddress.ip_network(value, strict=False)
+            return value
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        pass
+
+    range_match = _IPV4_RANGE.fullmatch(value)
+    if range_match:
+        lo, hi = int(range_match["lo"]), int(range_match["hi"])
+        if not 0 <= lo <= hi <= 255:
+            raise ValueError(f"config field {field_name!r}: invalid IPv4 range {value!r}")
+        ipaddress.ip_address(f"{range_match['prefix']}{lo}")
+        return value
+
+    hostname = value[:-1] if value.endswith(".") else value
+    if len(hostname) > 253 or not hostname:
+        raise ValueError(f"config field {field_name!r}: invalid hostname {value!r}")
+    if all(_HOST_LABEL.fullmatch(label) for label in hostname.split(".")):
+        return value
+    raise ValueError(
+        f"config field {field_name!r}: invalid host specification {value!r}"
+    )
+
+
 def _as_str_list(value: Any, field_name: str) -> list[str]:
     """Normalize targets/exclude to a list of strings.
 
@@ -199,14 +256,8 @@ def _as_str_list(value: Any, field_name: str) -> list[str]:
                 f"got {item!r}"
             )
         s = item.strip()
-        if not s:
-            continue
-        if s.startswith("-"):
-            raise ValueError(
-                f"config field {field_name!r}: refusing {s!r} — values must not "
-                f"start with '-' (would be passed as nmap options)"
-            )
-        out.append(s)
+        if s:
+            out.append(validate_target_spec(s, field_name))
     return out
 
 
@@ -285,6 +336,11 @@ def _parse_credentials(items: Any) -> list[Credential]:
             raise ValueError(
                 f"credential {it.get('name')!r}: match must be a list of strings"
             )
+        scheme = str(it.get("scheme", "https")).lower()
+        if ctype == "winrm" and scheme not in ("https", "http"):
+            raise ValueError(
+                f"credential {it.get('name')!r}: WinRM scheme must be https or http"
+            )
         creds.append(Credential(
             name=it.get("name", ctype),
             type=ctype,
@@ -292,7 +348,7 @@ def _parse_credentials(items: Any) -> list[Credential]:
             password=password,
             key_file=key_file,
             port=it.get("port"),
-            scheme=it.get("scheme", "https"),
+            scheme=scheme,
             match=[str(m) for m in match],
         ))
     return creds

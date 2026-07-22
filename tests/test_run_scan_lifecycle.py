@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 
 import netscan.correlate as correlate
-from netscan.config import Config
+from netscan.config import Config, Credential
 
 HOST_KEY = "aa:bb:cc:dd:ee:ff"
 CVE_ID = "CVE-2099-0001"
@@ -228,8 +228,48 @@ def test_run_scan_host_down_then_return_patched_resolves(tmp_path, monkeypatch):
     assert row["recurred"] == 0
 
 
+def test_run_scan_enforces_winrm_disabled_for_direct_config(tmp_path, monkeypatch):
+    """Direct Config callers cannot bypass winrm_enabled: false."""
+    monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
+    monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
+    monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
+    monkeypatch.setattr(correlate, "VirusTotalClient", _FakeVt)
+    monkeypatch.setattr(
+        correlate, "discover_and_fingerprint",
+        lambda cfg: [_host(vulnerable=False)],
+    )
+
+    from netscan import credentialed
+    cred = Credential(
+        name="windows", type="winrm", username="u", password="p"
+    )
+    monkeypatch.setattr(
+        credentialed, "credential_for", lambda host, credentials: cred
+    )
+
+    called = False
+
+    def should_not_scan(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("WinRM was called while disabled")
+
+    monkeypatch.setattr(credentialed, "scan_host", should_not_scan)
+    cfg = Config(
+        targets=["10.0.0.5"],
+        db_path=str(tmp_path / "scan.db"),
+        cache_dir=str(tmp_path / "cache"),
+        credentialed=True,
+        winrm_enabled=False,
+        msrc_matching=False,
+        credentials=[cred],
+    )
+    correlate.run_scan(cfg)
+    assert called is False
+
+
 def test_run_scan_finalizes_on_failure(tmp_path, monkeypatch):
-    """A crash after create_scan must still finish the scan row and close the DB."""
+    """A crash is recorded FAILED but never published as the latest scan."""
     monkeypatch.setattr(correlate, "KevCatalog", _FakeKev)
     monkeypatch.setattr(correlate, "NvdClient", _FakeNvd)
     monkeypatch.setattr(correlate, "EpssClient", _FakeEpss)
@@ -246,12 +286,14 @@ def test_run_scan_finalizes_on_failure(tmp_path, monkeypatch):
     from netscan.db import Database
     db = Database(cfg.db_path)
     try:
-        row = db._conn.execute(
-            "SELECT id, finished_at, host_count, finding_count FROM scans"
-        ).fetchone()
+        row = db._conn.execute("SELECT * FROM scans").fetchone()
         assert row is not None
         assert row["finished_at"] is not None
         assert row["host_count"] == 0
         assert row["finding_count"] == 0
+        assert row["status"] == "FAILED"
+        assert "boom" in row["error"]
+        assert db.latest_scan_id() is None
+        assert db.all_scans() == []
     finally:
         db.close()

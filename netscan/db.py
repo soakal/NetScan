@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS scans (
     host_count   INTEGER DEFAULT 0,  -- hosts that responded (== succeeded)
     hosts_attempted INTEGER,         -- targets expanded minus excludes; NULL if not derivable
     hosts_failed    INTEGER,         -- max(0, hosts_attempted - host_count)
-    finding_count INTEGER DEFAULT 0
+    finding_count INTEGER DEFAULT 0,
+    status       TEXT DEFAULT 'SUCCESS', -- RUNNING | SUCCESS | FAILED
+    error        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS hosts (
@@ -167,6 +169,9 @@ class Database:
                 ("hosts_attempted", "INTEGER"),
                 ("hosts_failed", "INTEGER"),
                 ("finding_count", "INTEGER DEFAULT 0"),
+                # Existing finished rows predate status and are successful.
+                ("status", "TEXT DEFAULT 'SUCCESS'"),
+                ("error", "TEXT"),
             ],
             "hosts": [
                 ("mac", "TEXT"),
@@ -254,7 +259,8 @@ class Database:
     def create_scan(self, profile: str, targets: list[str]) -> int:
         with self.tx() as c:
             cur = c.execute(
-                "INSERT INTO scans(started_at, profile, targets) VALUES (?,?,?)",
+                """INSERT INTO scans(started_at, profile, targets, status)
+                   VALUES (?,?,?,'RUNNING')""",
                 (time.time(), profile, json.dumps(targets)),
             )
             return int(cur.lastrowid)
@@ -265,9 +271,21 @@ class Database:
         with self.tx() as c:
             c.execute(
                 "UPDATE scans SET finished_at=?, host_count=?, finding_count=?, "
-                "hosts_attempted=?, hosts_failed=? WHERE id=?",
+                "hosts_attempted=?, hosts_failed=?, status='SUCCESS', error=NULL "
+                "WHERE id=?",
                 (time.time(), host_count, finding_count, hosts_attempted,
                  hosts_failed, scan_id),
+            )
+
+    def fail_scan(self, scan_id: int, error: str, host_count: int = 0,
+                  finding_count: int = 0) -> None:
+        """Finalize a failed scan without making it a report/baseline scan."""
+        with self.tx() as c:
+            c.execute(
+                """UPDATE scans SET finished_at=?, host_count=?, finding_count=?,
+                                  status='FAILED', error=?
+                   WHERE id=?""",
+                (time.time(), host_count, finding_count, error[:2000], scan_id),
             )
 
     def add_host(self, scan_id: int, host: dict[str, Any]) -> int:
@@ -425,13 +443,16 @@ class Database:
 
     def latest_scan_id(self) -> int | None:
         row = self._conn.execute(
-            "SELECT id FROM scans WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+            """SELECT id FROM scans
+               WHERE finished_at IS NOT NULL AND status='SUCCESS'
+               ORDER BY id DESC LIMIT 1"""
         ).fetchone()
         return int(row["id"]) if row else None
 
     def previous_scan_id(self, before: int) -> int | None:
         row = self._conn.execute(
             "SELECT id FROM scans WHERE id < ? AND finished_at IS NOT NULL "
+            "AND status='SUCCESS' "
             "ORDER BY id DESC LIMIT 1",
             (before,),
         ).fetchone()
@@ -459,9 +480,17 @@ class Database:
         row = self._conn.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()
         return dict(row) if row else None
 
+    def is_successful_scan(self, scan_id: int) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM scans WHERE id=? AND status='SUCCESS'", (scan_id,)
+        ).fetchone()
+        return row is not None
+
     def all_scans(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM scans WHERE finished_at IS NOT NULL ORDER BY id DESC"
+            """SELECT * FROM scans
+               WHERE finished_at IS NOT NULL AND status='SUCCESS'
+               ORDER BY id DESC"""
         ).fetchall()]
 
     def hosts(self, scan_id: int) -> list[dict]:
@@ -577,7 +606,8 @@ class Database:
         recurrences."""
         scans = self._conn.execute(
             "SELECT id, started_at, finished_at FROM scans "
-            "WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+            "WHERE finished_at IS NOT NULL AND status='SUCCESS' "
+            "ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
         out: dict[int, dict] = {}

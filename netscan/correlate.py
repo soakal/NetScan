@@ -142,6 +142,14 @@ def run_scan(cfg: Config) -> int:
             # Credentialed enrichment: log in (read-only) and read real inventory.
             if cfg.credentialed and cfg.credentials:
                 cred = cred_mod.credential_for(host, cfg.credentials)
+                # Enforce at execution time as well as load_config(): callers
+                # can construct Config directly and must not bypass the switch.
+                if cred and cred.type == "winrm" and not cfg.winrm_enabled:
+                    print(
+                        f"[cred] {host['ip']}: WinRM disabled; skipping remote login",
+                        file=sys.stderr,
+                    )
+                    cred = None
                 if cred:
                     res = cred_mod.scan_host(host, cred,
                                              strict_host_keys=cfg.strict_host_keys)
@@ -395,13 +403,13 @@ def run_scan(cfg: Config) -> int:
         print(f"[scan #{scan_id}] done: {total_findings} finding(s), "
               f"{len(resolved_rows)} resolved since last scan", file=sys.stderr)
         return scan_id
-    except Exception:
-        # Finalize the scan row so the UI / previous_scan_id don't leave a
-        # dangling unfinished scan after a crash mid-run.
+    except Exception as exc:
+        # Record the failure, but do not publish it as the latest report or use
+        # its partial findings as the baseline for the next successful scan.
         if scan_id is not None:
             try:
-                db.finish_scan(scan_id, host_count=len(hosts),
-                               finding_count=total_findings)
+                db.fail_scan(scan_id, str(exc), host_count=len(hosts),
+                             finding_count=total_findings)
                 print(f"[scan #{scan_id}] aborted after failure "
                       f"({total_findings} finding(s) persisted)", file=sys.stderr)
             except Exception as finish_err:  # pragma: no cover

@@ -46,3 +46,28 @@ def test_scan_ssh_host_key_policy(monkeypatch, strict):
     else:
         assert isinstance(recorded["policy"], paramiko.AutoAddPolicy)
         assert "loaded_known_hosts" not in recorded
+
+
+def test_strict_winrm_rejects_http_before_connect(monkeypatch):
+    from netscan.config import Credential
+
+    called = False
+
+    class FakeWinrm:
+        @staticmethod
+        def Session(*args, **kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("must not connect over HTTP in strict mode")
+
+    monkeypatch.setattr(credentialed, "_HAVE_WINRM", True)
+    monkeypatch.setattr(credentialed, "winrm", FakeWinrm)
+    cred = Credential(
+        name="w", type="winrm", username="u", password="p", scheme="http"
+    )
+    result = credentialed.scan_winrm(
+        {"ip": "192.0.2.10"}, cred, strict_host_keys=True
+    )
+    assert not result.ok
+    assert "requires WinRM over HTTPS" in result.error
+    assert called is False

@@ -5,8 +5,8 @@ import os
 
 import pytest
 
-from netscan.config import load_config
-from netscan.scanner import _expand_targets
+from netscan.config import Config, Credential, load_config
+from netscan.scanner import _expand_targets, _validate_scan_scope
 
 
 def test_bool_string_false_is_false(tmp_path):
@@ -45,6 +45,29 @@ def test_rejects_dash_prefixed_exclude(tmp_path):
         load_config(str(p))
 
 
+@pytest.mark.parametrize("value", [
+    "127.0.0.1 --script vuln",
+    "host.example --script=vuln",
+    "127.0.0.1,evil.example",
+    "host.example;--script=vuln",
+])
+def test_rejects_embedded_nmap_options(tmp_path, value):
+    p = tmp_path / "c.yaml"
+    p.write_text(f"targets: [{value!r}]\n")
+    with pytest.raises(ValueError, match="no whitespace/options|invalid host"):
+        load_config(str(p))
+
+
+def test_accepts_supported_host_tokens(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "targets: [10.0.0.1, 10.0.0.0/30, 10.0.0.5-10, host.example]\n"
+    )
+    assert load_config(str(p)).targets == [
+        "10.0.0.1", "10.0.0.0/30", "10.0.0.5-10", "host.example",
+    ]
+
+
 def test_key_file_expands_tilde(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -66,6 +89,18 @@ def test_key_file_expands_tilde(tmp_path, monkeypatch):
 def test_expand_targets_rejects_huge_cidr():
     with pytest.raises(ValueError, match="refusing more than"):
         _expand_targets(["10.0.0.0/8"])
+
+
+def test_scope_cap_runs_before_nmap_backend():
+    with pytest.raises(ValueError, match="refusing more than"):
+        _validate_scan_scope(["10.0.0.0/8"])
+
+
+def test_direct_config_target_injection_is_rejected():
+    with pytest.raises(ValueError, match="no whitespace/options"):
+        _validate_scan_scope(Config(
+            targets=["127.0.0.1 --script vuln"]
+        ).targets)
 
 
 def test_expand_targets_small_cidr_ok():
@@ -106,3 +141,18 @@ def test_winrm_enabled_keeps_winrm_creds(tmp_path):
     cfg = load_config(str(p))
     assert cfg.winrm_enabled is True
     assert [c.type for c in cfg.credentials] == ["winrm"]
+
+
+def test_secrets_are_redacted_from_dataclass_repr():
+    cred = Credential(
+        name="windows", type="winrm", username="u", password="secret-password"
+    )
+    cfg = Config(
+        nvd_api_key="nvd-secret",
+        vt_api_key="vt-secret",
+        msrc_api_key="msrc-secret",
+        credentials=[cred],
+    )
+    rendered = repr(cfg)
+    for secret in ("secret-password", "nvd-secret", "vt-secret", "msrc-secret"):
+        assert secret not in rendered

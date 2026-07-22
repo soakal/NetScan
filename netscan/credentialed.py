@@ -371,6 +371,12 @@ _PS_SOFTWARE = (
 def scan_winrm(host: dict, cred: Credential, timeout: float = 25.0,
                strict_host_keys: bool = True) -> CredResult:
     res = CredResult(auth_method="winrm")
+    if strict_host_keys and cred.scheme.lower() != "https":
+        res.error = (
+            "strict_host_keys requires WinRM over HTTPS; set scheme: https "
+            "or explicitly disable strict_host_keys only on a trusted lab network"
+        )
+        return res
     if not _HAVE_WINRM:
         res.error = "pywinrm not installed (pip install pywinrm)"
         return res

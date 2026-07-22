@@ -86,6 +86,11 @@ goto menu
 echo.
 echo Seeding demo data...
 python run.py demo
+if errorlevel 1 (
+    echo Demo seed failed. Not starting the report server.
+    pause
+    goto menu
+)
 echo Starting report server at http://127.0.0.1:8000
 echo Press Ctrl+C to stop.
 python run.py serve
