@@ -147,6 +147,25 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
             "os_name": os_name, "os_accuracy": os_acc, "device_type": device_type,
             "host_key": host_key, "services": services,
         })
+
+    # Two different IPs can legitimately report the same MAC (cloned VM
+    # templates, some virtual-switch/NAT setups) or illegitimately (ARP
+    # spoofing) -- either way host_key (UNIQUE per scan) would collide and
+    # crash the DB insert. Disambiguate every host sharing a MAC by folding
+    # the IP into its key, and flag it so it surfaces as a signal rather
+    # than silently changing identity.
+    mac_counts: dict[str, int] = {}
+    for h in hosts:
+        if h["mac"]:
+            mac_counts[h["mac"]] = mac_counts.get(h["mac"], 0) + 1
+    for h in hosts:
+        if h["mac"] and mac_counts[h["mac"]] > 1:
+            h["host_key"] = f"{h['mac']}|{h['ip']}"
+            h["duplicate_mac"] = True
+            print(f"[warn] {h['ip']} shares MAC {h['mac']} with "
+                  f"{mac_counts[h['mac']] - 1} other host(s) -- possible "
+                  f"cloned VM or ARP spoofing", file=sys.stderr)
+
     return hosts
 
 

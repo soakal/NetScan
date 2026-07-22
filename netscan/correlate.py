@@ -183,6 +183,9 @@ def run_scan(cfg: Config) -> int:
 
         host_id = db.add_host(scan_id, host)
 
+        if host.get("duplicate_mac"):
+            db.add_fact(host_id, "duplicate_mac", host["mac"])
+
         # Persist credentialed facts (hotfixes, kernel, counts).
         if cred_payload:
             for kb in cred_payload.hotfixes:
