@@ -116,10 +116,10 @@ class Config:
     # accurate software/patch inventory. Quietest + most accurate scan mode.
     credentialed: bool = False
     credentials: list[Credential] = field(default_factory=list)
-    # WinRM remote inventory for Windows. On by default so Windows hosts can be
-    # inventoried remotely when you cannot log into each PC by hand. Set false
-    # only if you do not want NetScan using WinRM at all.
-    winrm_enabled: bool = True
+    # WinRM remote inventory for Windows. Off by default — NetScan will not try
+    # to log into Windows hosts over WinRM. Set true only if you intentionally
+    # want remote OS/hotfix/software inventory with a service account.
+    winrm_enabled: bool = False
     # Verify host identity during credentialed scans. On by default (SSH:
     # known_hosts required; WinRM: valid TLS cert required when winrm_enabled).
     # Set false only for a first lab/fleet scan when you have not provisioned
@@ -231,7 +231,7 @@ def load_config(path: str | os.PathLike | None) -> Config:
         vt_check_host_ips=_as_bool(data.get("vt_check_host_ips"), False, "vt_check_host_ips"),
         credentialed=_as_bool(data.get("credentialed"), False, "credentialed"),
         credentials=_parse_credentials(data.get("credentials", []) or []),
-        winrm_enabled=_as_bool(data.get("winrm_enabled"), True, "winrm_enabled"),
+        winrm_enabled=_as_bool(data.get("winrm_enabled"), False, "winrm_enabled"),
         strict_host_keys=_as_bool(
             data.get("strict_host_keys"), True, "strict_host_keys"
         ),

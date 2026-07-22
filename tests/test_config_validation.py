@@ -73,30 +73,10 @@ def test_expand_targets_small_cidr_ok():
     assert ips == ["10.0.0.1", "10.0.0.2"]
 
 
-def test_winrm_enabled_by_default_keeps_winrm_creds(tmp_path):
+def test_winrm_disabled_by_default_ignores_winrm_creds(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text(
         "targets: []\n"
-        "credentials:\n"
-        "  - name: w\n"
-        "    type: winrm\n"
-        "    username: u\n"
-        "    password: p\n"
-        "  - name: l\n"
-        "    type: ssh\n"
-        "    username: u\n"
-        "    password: p\n"
-    )
-    cfg = load_config(str(p))
-    assert cfg.winrm_enabled is True
-    assert [c.type for c in cfg.credentials] == ["winrm", "ssh"]
-
-
-def test_winrm_disabled_ignores_winrm_creds(tmp_path):
-    p = tmp_path / "c.yaml"
-    p.write_text(
-        "targets: []\n"
-        "winrm_enabled: false\n"
         "credentials:\n"
         "  - name: w\n"
         "    type: winrm\n"
@@ -110,3 +90,19 @@ def test_winrm_disabled_ignores_winrm_creds(tmp_path):
     cfg = load_config(str(p))
     assert cfg.winrm_enabled is False
     assert [c.type for c in cfg.credentials] == ["ssh"]
+
+
+def test_winrm_enabled_keeps_winrm_creds(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "targets: []\n"
+        "winrm_enabled: true\n"
+        "credentials:\n"
+        "  - name: w\n"
+        "    type: winrm\n"
+        "    username: u\n"
+        "    password: p\n"
+    )
+    cfg = load_config(str(p))
+    assert cfg.winrm_enabled is True
+    assert [c.type for c in cfg.credentials] == ["winrm"]

@@ -67,22 +67,22 @@ and by far the most accurate.
   kernel (`uname -r`), and the package list (`dpkg-query`/`rpm -qa`). The OS,
   kernel, and a curated set of well-known packages (OpenSSH, OpenSSL, Apache,
   nginx, …) are mapped to CPEs and correlated against NVD.
-- **WinRM** (Windows, via `pywinrm`): **on by default** (`winrm_enabled: true`)
-  so you can inventory Windows hosts remotely when you cannot log into each PC.
-  Reads the OS caption/build (`Win32_OperatingSystem`), **installed hotfixes**
-  (`Get-HotFix`), and installed software (registry uninstall hives). The hotfix
-  list is shown on the device page so you can confirm a specific KB is present
-  after patching. Set `winrm_enabled: false` to disable WinRM entirely.
+- **WinRM** (Windows, via `pywinrm`): **off by default** (`winrm_enabled: false`)
+  — NetScan will not log into Windows PCs over WinRM. Network-only scanning
+  still works. When you intentionally enable it, reads the OS caption/build
+  (`Win32_OperatingSystem`), **installed hotfixes** (`Get-HotFix`), and
+  installed software (registry uninstall hives).
 
 Everything run on the target is **read-only**; nothing is changed. Commands used:
 `cat /etc/os-release`, `uname -r`, `dpkg-query -W`/`rpm -qa` over SSH;
 `Get-CimInstance Win32_OperatingSystem`, `Get-HotFix`, and a read of the
-Uninstall registry keys over WinRM.
+Uninstall registry keys over WinRM (only when `winrm_enabled: true`).
 
-Enable it in `config.yaml` (`credentialed: true` + a `credentials:` block) and
-install the optional deps: `pip install paramiko pywinrm`. Use a dedicated
-read-only service account — not a domain admin — and keep the config file out of
-version control.
+Enable SSH inventory in `config.yaml` (`credentialed: true` + an SSH
+`credentials:` entry) and `pip install paramiko`. Use a dedicated read-only
+service account — not a domain admin — and keep the config file out of
+version control. Leave `winrm_enabled: false` unless you intentionally want
+remote Windows inventory (`pip install pywinrm` + a WinRM credential).
 
 By default, credentialed scans **verify** host identity (`strict_host_keys: true`
 — SSH known_hosts / WinRM TLS certs required). Unknown or changed hosts fail

@@ -35,23 +35,23 @@ vt_check_host_ips: false   # set true to look up each live host IP on VirusTotal
 # Log into hosts you OWN with a least-privilege account and read an accurate
 # software/patch inventory. Quietest + most accurate scan mode: a normal
 # management login running read-only queries (no exploitation, no changes).
-#   SSH (Linux/Unix/network gear): pip install paramiko
-#   WinRM (Windows):               pip install pywinrm
+# SSH (Linux/Unix/network gear) needs: pip install paramiko
 #
 # SECURITY: prefer SSH keys or `password_env` over inline passwords, and keep
 # this file out of version control (chmod 600). Use a dedicated read-only
 # service account, not a domain admin.
 #
-# Host identity: credentialed scans VERIFY SSH host keys / WinRM TLS certs by
-# default (strict_host_keys: true). For a first lab scan without known_hosts or
-# trusted certs, set strict_host_keys: false (MITM risk — only on trusted nets).
+# Host identity: credentialed scans VERIFY SSH host keys by default
+# (strict_host_keys: true). For a first lab scan without known_hosts, set
+# strict_host_keys: false (MITM risk — only for trusted lab networks).
 credentialed: false
 strict_host_keys: true
 
-# WinRM remote Windows inventory. ON by default so NetScan can pull OS /
-# hotfix / software inventory when you cannot log into each Windows PC by hand.
-# Set false only if you want to disable WinRM entirely.
-winrm_enabled: true
+# WinRM remote Windows inventory. OFF by default — NetScan will not log into
+# Windows PCs over WinRM. Leave this false for network-only scanning of
+# Windows hosts. Set true only if you intentionally want remote inventory
+# (also needs: pip install pywinrm + a WinRM credential below).
+winrm_enabled: false
 
 credentials:
   # - name: linux-fleet
@@ -62,6 +62,7 @@ credentials:
   #   port: 22
   #   match: ["192.168.1.0/24"]         # which hosts this cred applies to
   #
+  # WinRM example (only used when winrm_enabled: true):
   # - name: windows-fleet
   #   type: winrm
   #   username: 'SCANDOMAIN\svc-scan'
@@ -78,8 +79,8 @@ credentials:
 #       distro's *fixed* version, eliminating the false positives you get from
 #       generic version/CPE matching. No key needed.
 oval_matching: true
-# MSRC: Microsoft CVE->KB missing-patch detection. Used when WinRM inventory
-#       is enabled (winrm_enabled: true) and a WinRM credential exists.
+# MSRC: Microsoft CVE->KB missing-patch detection. Only used when WinRM
+#       inventory is enabled (winrm_enabled: true) and a WinRM credential exists.
 msrc_matching: true
 msrc_months: 3            # how many recent patch-Tuesday months to pull/correlate
 msrc_api_key: null        # optional; env var NETSCAN_MSRC_API_KEY
