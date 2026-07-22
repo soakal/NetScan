@@ -14,6 +14,7 @@ protection than active exploitation, which keeps scans low-impact.
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import socket
 import sys
@@ -38,6 +39,16 @@ def nmap_available() -> bool:
         return True
     except Exception:
         return False
+
+
+def _os_detection_allowed() -> bool:
+    """nmap's -O hard-requires actual root (euid 0) -- Linux capabilities
+    like cap_net_raw/cap_net_admin (which are enough for -sS/-sV) do NOT
+    satisfy it. On Windows there's no geteuid() and no confirmed equivalent
+    hard-block, so we let it proceed and rely on nmap's own error surfacing."""
+    if not hasattr(os, "geteuid"):
+        return True
+    return os.geteuid() == 0
 
 
 def cpe22_to_23(cpe: str) -> str:
@@ -69,7 +80,13 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
     profile = cfg.profile
     args = profile["nmap_args"]
     if profile.get("os_detection"):
-        args += " -O"
+        if _os_detection_allowed():
+            args += " -O"
+        else:
+            print("[warn] OS detection (-O) requires root -- skipping it for "
+                  "this scan. Re-run with sudo for OS fingerprinting. (nmap "
+                  "requires euid 0 for -O; setcap capabilities are not "
+                  "sufficient.)", file=sys.stderr)
 
     targets = " ".join(cfg.targets)
     extra = args
@@ -77,8 +94,6 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
         extra += " --exclude " + ",".join(cfg.exclude)
 
     print(f"[nmap] scanning {targets}\n[nmap] args: {extra}", file=sys.stderr)
-    # sudo may be required for -sS/-O. python-nmap shells out to the nmap binary,
-    # which will surface a clear error if privileges are insufficient.
     scanner.scan(hosts=targets, arguments=extra)
 
     hosts: list[dict[str, Any]] = []

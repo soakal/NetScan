@@ -147,15 +147,24 @@ a substitute.
 
 ## Install
 
+**Windows:**
 ```bash
 python3 -m pip install -r requirements.txt
-
-# Recommended: install the nmap binary for OS detection + CPE-based CVE matching
-sudo apt install nmap        # Debian/Ubuntu
-# sudo dnf install nmap      # RHEL/Fedora
-# brew install nmap          # macOS
-# winget install Insecure.Nmap   # Windows
+winget install Insecure.Nmap   # recommended, for OS detection + CPE-based CVE matching
 ```
+
+**Linux/macOS:**
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+`setup.sh` installs the Python dependencies into a project-local `.venv`
+(avoiding the "externally-managed-environment" error modern Debian/Ubuntu
+throws on a plain `pip install`), installs `nmap` if it's missing, and offers
+to grant `nmap` the capability it needs for SYN scans/service detection
+without `sudo`. OS detection specifically still requires `sudo` — nmap
+enforces that regardless of capabilities. See [RUNNING.md](RUNNING.md) for
+details.
 
 See [RUNNING.md](RUNNING.md) for a fuller setup walkthrough, including the
 double-click `run.bat` launcher on Windows and the `run.sh` equivalent on
@@ -194,7 +203,11 @@ including a step-by-step Linux install. Everything below also works from a
 terminal on any platform.
 
 ```bash
-# 1) scan (root/sudo recommended so nmap can do SYN + OS detection)
+# 1) scan — on Linux/macOS, ./setup.sh grants nmap the capability it needs
+#    for SYN scan + service detection without sudo. OS detection specifically
+#    still requires sudo (nmap enforces this regardless of capabilities);
+#    without it, OS fingerprinting is skipped but the rest of the scan
+#    still runs (see RUNNING.md):
 sudo python run.py scan -c config.yaml
 
 # 2) serve the report
@@ -239,6 +252,7 @@ data can't get mixed into your real scan history.
 run.py                     CLI: scan / serve / demo / profiles
 run.bat                    Windows double-click launcher (menu over run.py)
 run.sh                     Linux/macOS launcher, same menu as run.bat
+setup.sh                   Linux/macOS one-time setup (venv, deps, nmap)
 RUNNING.md                 setup/run walkthrough (Windows + Linux install)
 LICENSE                    proprietary, all rights reserved (Copyright VRSI)
 config.example.yaml        copy to config.yaml
