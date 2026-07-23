@@ -16,9 +16,18 @@ sudo ./run.sh        # every time: launches the app (sudo enables OS detection)
 > not enough for OS fingerprinting specifically. Details in "About `sudo`"
 > below.
 
-**Windows:** double-click `run.bat`. No setup step needed — Windows doesn't
-have the restriction `setup.sh` works around (see "Why setup.sh exists"
-below).
+**Windows:**
+```bash
+setup.bat            # one-time: installs dependencies, offers to install nmap
+run.bat               # every time: launches the app
+```
+`setup.bat` is recommended, not required (Windows doesn't have the
+`pip install` restriction `setup.sh` works around — see "Why `setup.sh`
+exists" below). Its main value on Windows is nmap: `winget install
+Insecure.Nmap` installs nmap 7.80, which has a known crash bug on large
+scans ([nmap/nmap#1764](https://github.com/nmap/nmap/issues/1764)) —
+`setup.bat` installs a current, non-buggy release straight from nmap.org
+instead. Without it, you can still just double-click `run.bat` directly.
 
 Both launchers show the same menu:
 
@@ -41,7 +50,8 @@ Both launchers show the same menu:
 
 ## First run checklist
 
-1. **Linux/macOS only:** run `./setup.sh` once. Windows doesn't need this.
+1. Run setup once: `./setup.sh` (Linux/macOS) or `setup.bat` (Windows,
+   recommended — gets a non-buggy nmap; see "Quick start" above).
 2. Open `config.yaml` and set `targets:` to the hosts/subnets you're
    authorized to scan. Add anything you want skipped under `exclude:` (e.g.
    fragile devices, the scanner host itself).
@@ -144,11 +154,15 @@ python run.py profiles
     python3 -m venv .venv
     .venv/bin/pip install -r requirements.txt
     ```
-  - Windows: `pip install -r requirements.txt` works directly.
-- **nmap** (optional but recommended) — `winget install Insecure.Nmap` on
-  Windows, or your distro's package on Linux/macOS (`setup.sh` offers to
-  install it). Without it, NetScan falls back to a pure-Python scanner —
-  still works, just less precise.
+  - Windows: `setup.bat` handles this (see above). Manual alternative:
+    `pip install -r requirements.txt`.
+- **nmap** (optional but recommended) — `setup.bat` on Windows (installs a
+  current release from nmap.org; deliberately avoids `winget install
+  Insecure.Nmap`, whose package is stuck at 7.80 and has a known crash bug
+  on large scans, [nmap/nmap#1764](https://github.com/nmap/nmap/issues/1764)),
+  or your distro's package on Linux/macOS (`setup.sh` offers to install it).
+  Without it, NetScan falls back to a pure-Python scanner — still works,
+  just less precise.
 - **Your own `config.yaml`** (copied from `config.example.yaml`, or created
   automatically) with `targets:` set to what you're authorized to scan. It's
   gitignored — it holds your real network details and stays local.

@@ -77,7 +77,10 @@ def cpe22_to_23(cpe: str) -> str:
 
 def _nmap_upgrade_hint() -> str:
     if sys.platform == "win32":
-        return "winget upgrade Insecure.Nmap"
+        # winget's own "Insecure.Nmap" package is stuck at 7.80 -- the exact
+        # buggy version this warning is about -- so "winget upgrade" is a
+        # dead end here. setup.bat installs straight from nmap.org instead.
+        return "run setup.bat (installs the current nmap release from nmap.org -- winget's own package is stuck at 7.80 and can't fix this)"
     if sys.platform == "darwin":
         return "brew upgrade nmap"
     return "your distro's package manager (apt/dnf/pacman/etc.)"
@@ -372,7 +375,9 @@ def discover_and_fingerprint(cfg: Config) -> list[dict[str, Any]]:
     if nmap_available():
         return _scan_with_nmap(cfg)
     if sys.platform == "win32":
-        install_hint = "winget install --id Insecure.Nmap -e (then open a new terminal)"
+        # Not "winget install Insecure.Nmap" -- that package is stuck at
+        # 7.80, which has a known crash bug on large scans (nmap/nmap#1764).
+        install_hint = "run setup.bat (then open a new terminal)"
     elif sys.platform == "darwin":
         install_hint = "brew install nmap"
     else:

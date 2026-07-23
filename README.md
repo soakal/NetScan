@@ -149,9 +149,13 @@ a substitute.
 
 **Windows:**
 ```bash
-python3 -m pip install -r requirements.txt
-winget install Insecure.Nmap   # recommended, for OS detection + CPE-based CVE matching
+setup.bat
 ```
+`setup.bat` installs the Python dependencies and offers to install nmap
+straight from nmap.org (recommended, for OS detection + CPE-based CVE
+matching). It deliberately does NOT use `winget install Insecure.Nmap` --
+that package is stuck at nmap 7.80, which has a known crash bug on large
+scans ([nmap/nmap#1764](https://github.com/nmap/nmap/issues/1764)).
 
 **Linux/macOS:**
 ```bash
@@ -252,6 +256,7 @@ data can't get mixed into your real scan history.
 run.py                     CLI: scan / serve / demo / profiles
 run.bat                    Windows double-click launcher (menu over run.py)
 run.sh                     Linux/macOS launcher, same menu as run.bat
+setup.bat                  Windows one-time setup (deps, non-buggy nmap)
 setup.sh                   Linux/macOS one-time setup (venv, deps, nmap)
 RUNNING.md                 setup/run walkthrough (Windows + Linux install)
 LICENSE                    proprietary, all rights reserved (Copyright VRSI)
