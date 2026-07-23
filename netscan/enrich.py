@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -34,15 +35,31 @@ USER_AGENT = "NetScan/0.1 (+internal vulnerability scanner)"
 # tiny disk cache
 # ---------------------------------------------------------------------------
 
+def _harden_perms(path: Path, mode: int) -> None:
+    """Best-effort permission tightening -- see the comment on Database.path
+    in db.py for why (cached threat-intel data is lower-stakes than the DB,
+    but the cache dir sits right next to it and should match). No-op-ish on
+    Windows; never let a chmod quirk (e.g. a networked filesystem) crash the
+    app."""
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
 class Cache:
     def __init__(self, root: str):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        _harden_perms(self.root, 0o700)
 
     def _path(self, namespace: str, key: str) -> Path:
         digest = hashlib.sha256(key.encode()).hexdigest()[:32]
         d = self.root / namespace
+        is_new = not d.exists()
         d.mkdir(exist_ok=True)
+        if is_new:
+            _harden_perms(d, 0o700)
         return d / f"{digest}.json"
 
     def get(self, namespace: str, key: str, max_age_hours: float) -> Any | None:
@@ -57,7 +74,9 @@ class Cache:
             return None
 
     def put(self, namespace: str, key: str, value: Any) -> None:
-        self._path(namespace, key).write_text(json.dumps(value))
+        p = self._path(namespace, key)
+        p.write_text(json.dumps(value))
+        _harden_perms(p, 0o600)
 
 
 # ---------------------------------------------------------------------------
@@ -265,23 +284,62 @@ class NvdClient:
         headers = {"User-Agent": USER_AGENT}
         if self.api_key:
             headers["apiKey"] = self.api_key
-        params = {"cpeName": cpe23, "resultsPerPage": 200}
 
-        self._throttle()
-        try:
-            resp = requests.get(NVD_API_URL, headers=headers, params=params, timeout=40)
-            if resp.status_code == 404:
-                self.cache.put("nvd2", cpe23, [])
-                return []
-            resp.raise_for_status()
-            payload = resp.json()
-        except (requests.RequestException, ValueError) as e:
-            print(f"[nvd] lookup failed for {cpe23}: {e}", file=sys.stderr)
-            return []  # don't cache transient failures
+        # Paginate: a single 200-result page silently truncated common
+        # products (openssl, apache http_server, Windows builds all clear
+        # 200 CVEs), and the truncated list got cached for a week -- CVEs
+        # just silently missing from reports. _NVD_MAX_PAGES is a sanity
+        # backstop against a runaway loop from a malformed/malicious
+        # totalResults, not a real-world limit (no CPE has 10k+ CVEs).
+        page_size = 200
+        max_pages = 50
+        start_index = 0
+        raw: list[dict] = []
+        complete = False  # only cache a full, un-truncated result set
+        for _ in range(max_pages):
+            params = {"cpeName": cpe23, "resultsPerPage": page_size, "startIndex": start_index}
+            self._throttle()
+            try:
+                resp = requests.get(NVD_API_URL, headers=headers, params=params, timeout=40)
+                if resp.status_code == 404:
+                    if start_index == 0:
+                        self.cache.put("nvd2", cpe23, [])
+                        return []
+                    break  # unexpected mid-pagination, but keep what we have
+                resp.raise_for_status()
+                payload = resp.json()
+            except (requests.RequestException, ValueError) as e:
+                print(f"[nvd] lookup failed for {cpe23} (startIndex={start_index}): {e}",
+                      file=sys.stderr)
+                if start_index == 0:
+                    return []  # don't cache transient failures
+                break  # keep the pages already fetched rather than discard them
 
-        findings = [self._normalize(item, cpe23) for item in payload.get("vulnerabilities", [])]
+            page = payload.get("vulnerabilities", [])
+            raw.extend(page)
+            # Defensive: NVD returns totalResults as an int today, but don't
+            # let a malformed/unexpected response type (e.g. a string) crash
+            # the whole scan with an uncaught int-vs-str comparison -- treat
+            # anything unparseable as "unknown total", which just means this
+            # fetch won't be marked complete/cached (safe direction).
+            try:
+                total = int(payload.get("totalResults", len(raw)))
+            except (TypeError, ValueError):
+                total = None
+            start_index += page_size
+            if not page or (total is not None and start_index >= total):
+                complete = total is not None
+                break
+        else:
+            # Loop exhausted max_pages without a natural stop -- treat as
+            # incomplete rather than silently caching a possibly-truncated
+            # set (mirrors the very bug this pagination fix was added for).
+            complete = False
+
+        findings = [self._normalize(item, cpe23) for item in raw]
         findings = [f for f in findings if f]
-        self.cache.put("nvd2", cpe23, findings)
+        if complete:
+            self.cache.put("nvd2", cpe23, findings)
         return findings
 
     def cve_by_id(self, cve_id: str) -> dict | None:

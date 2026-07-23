@@ -83,7 +83,10 @@ class Credential:
     name: str
     type: str                       # "ssh" | "winrm"
     username: str
-    password: str | None = None
+    # repr=False: a dataclass's auto-generated __repr__ would otherwise
+    # include the plaintext password -- e.g. in a future debug print(cred)
+    # or an uncaught exception that reprs its locals.
+    password: str | None = field(default=None, repr=False)
     key_file: str | None = None     # ssh only
     port: int | None = None
     scheme: str = "https"           # winrm: https (5986) or http (5985)
@@ -189,18 +192,28 @@ def _parse_credentials(items: list[dict]) -> list[Credential]:
         ctype = it.get("type")
         if ctype not in ("ssh", "winrm"):
             raise ValueError(f"credential {it.get('name')!r}: type must be ssh or winrm")
+        scheme = it.get("scheme", "https")
+        if scheme not in ("http", "https"):
+            raise ValueError(f"credential {it.get('name')!r}: scheme must be http or https")
         # Password resolution order: inline -> env-var name in password_env.
         password = it.get("password")
         if not password and it.get("password_env"):
             password = os.environ.get(it["password_env"])
+        # paramiko does NOT expand "~" in key_filename (only in its own
+        # look_for_keys defaults) -- without this, the documented example
+        # (`key_file: ~/.ssh/scan_ed25519`) always raises FileNotFoundError,
+        # silently pushing users toward password auth, the weaker mode.
+        key_file = it.get("key_file")
+        if key_file:
+            key_file = os.path.expanduser(key_file)
         creds.append(Credential(
             name=it.get("name", ctype),
             type=ctype,
             username=it.get("username", ""),
             password=password,
-            key_file=it.get("key_file"),
+            key_file=key_file,
             port=it.get("port"),
-            scheme=it.get("scheme", "https"),
+            scheme=scheme,
             match=it.get("match", []) or [],
         ))
     return creds

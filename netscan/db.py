@@ -15,6 +15,7 @@ RESOLVED. If still present, PERSISTING. If brand new, NEW.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -149,6 +150,17 @@ class Database:
         self._conn.executescript(SCHEMA)
         self._migrate()
         self._conn.commit()
+        # netscan.db is a full internal network map (hosts, services,
+        # unpatched CVEs) -- don't leave it at the OS-default (often
+        # world-readable) permissions on a multi-user machine. No-op-ish on
+        # Windows (no POSIX permission bits; chmod there only toggles the
+        # read-only attribute) but correct and load-bearing on Linux/macOS.
+        # Best-effort: never let a permissions quirk (e.g. a networked
+        # filesystem that rejects chmod) crash the app.
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
     def _migrate(self) -> None:
         """Add columns introduced after a DB was first created. Safe to run

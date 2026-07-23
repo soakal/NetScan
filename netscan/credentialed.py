@@ -91,8 +91,11 @@ class CredResult:
 def credential_for(host: dict, creds: list[Credential]) -> Credential | None:
     """Pick the first credential whose `match` covers the host's IP. An empty
     match list matches any host of that credential's type. SSH is preferred for
-    hosts that look *nix, WinRM for Windows, but the network fingerprint is only
-    a hint — we try whatever matches."""
+    hosts that look *nix, WinRM for Windows. When the fingerprint gives no
+    confident type (unknown/empty os_name), the network signal is only a hint
+    and we try whatever matches; but once it IS confident, we only offer a
+    credential of the matching type -- never fall back to a mismatched one
+    just because it was the only thing in range (see the comment below)."""
     ip = host.get("ip")
     os_blob = (host.get("os_name") or "").lower()
     prefer = "winrm" if "windows" in os_blob else ("ssh" if os_blob else None)
@@ -117,6 +120,16 @@ def credential_for(host: dict, creds: list[Credential]) -> Credential | None:
         for c in candidates:
             if c.type == prefer:
                 return c
+        # We have a confident OS-type signal (from the network fingerprint)
+        # but no credential of that type is in range -- do NOT fall back to
+        # a mismatched-type candidate just because its `match` happened to
+        # be broad/empty. An empty `match` is documented as "applies to
+        # every host of that type" (see Credential docstring); silently
+        # ignoring `type` here made that false, and sprayed e.g. an SSH
+        # credential at every WinRM host (or vice versa) in range --
+        # including any rogue/unintended device that happens to be
+        # listening on the right port.
+        return None
     return candidates[0]
 
 
@@ -317,7 +330,14 @@ def scan_ssh(host: dict, cred: Credential, timeout: float = 12.0,
             ip, port=cred.default_port(), username=cred.username,
             password=cred.password, key_filename=cred.key_file,
             timeout=timeout, banner_timeout=timeout, auth_timeout=timeout,
-            look_for_keys=bool(cred.key_file), allow_agent=False,
+            # False unconditionally, not bool(cred.key_file): with it True,
+            # if the configured key fails, paramiko silently falls back to
+            # trying the OPERATOR's own default identities (~/.ssh/id_*)
+            # against the scan target -- an unintended (and possibly more
+            # privileged) identity being offered to a host it was never
+            # meant to authenticate to. allow_agent=False closes the same
+            # gap for a running ssh-agent.
+            look_for_keys=False, allow_agent=False,
         )
     except Exception as e:  # paramiko raises many subtypes
         res.error = f"ssh connect failed: {e}"

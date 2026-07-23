@@ -255,6 +255,13 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
 # Pure-Python fallback path
 # ---------------------------------------------------------------------------
 
+# Sanity cap on how many addresses a single target/exclude list may expand
+# to. Two purposes: (1) a huge CIDR (e.g. a typo'd /0) can't OOM the process
+# or commit an operator to an accidental scan of the whole internet, and (2)
+# it bounds the per-entry range loop below, which is otherwise unbounded.
+_MAX_EXPANDED_TARGETS = 65536
+
+
 def _expand_targets(targets: list[str], strict: bool = False) -> list[str]:
     """Expand CIDR/`a.b.c.d-e`/plain-IP target specs into individual IPs.
     Hostnames and anything else nmap's own target grammar understands are
@@ -262,29 +269,62 @@ def _expand_targets(targets: list[str], strict: bool = False) -> list[str]:
     (matches nmap's own resolve-it-for-me behavior closely enough for stats
     purposes). Pass strict=True to raise instead: used for `exclude`, where
     silently failing to honor an entry means scanning a host the caller
-    explicitly asked to skip -- fail closed, not open."""
+    explicitly asked to skip -- fail closed, not open.
+
+    Every returned string is guaranteed to have round-tripped through
+    ipaddress.ip_address() -- load-bearing, not just cosmetic: python-nmap
+    splits the `hosts` argument with shlex and concatenates the tokens
+    straight into nmap's argv with no filtering, so anything that reaches
+    the caller unvalidated becomes injected nmap flags (e.g. a crafted
+    `a.b.c.d-e` entry could smuggle in `-oG <path>` for arbitrary file
+    write, or `--script=`). The CIDR and plain-IP branches already validated
+    via ipaddress; the range branch now does too."""
     ips: list[str] = []
     for t in targets:
         t = t.strip()
         try:
             if "/" in t:
                 net = ipaddress.ip_network(t, strict=False)
+                if net.num_addresses > _MAX_EXPANDED_TARGETS:
+                    raise ValueError(
+                        f"{t!r} expands to {net.num_addresses} addresses, "
+                        f"over the {_MAX_EXPANDED_TARGETS}-address sanity cap"
+                    )
                 ips.extend(str(h) for h in net.hosts())
             elif "-" in t and t.count(".") == 3:
                 # 192.168.1.10-50 style
                 base, rng = t.rsplit(".", 1)
-                lo, hi = rng.split("-")
-                ips.extend(f"{base}.{i}" for i in range(int(lo), int(hi) + 1))
+                lo_s, hi_s = rng.split("-")
+                lo, hi = int(lo_s), int(hi_s)
+                if hi < lo:
+                    raise ValueError(f"{t!r}: range end before start")
+                if hi - lo + 1 > _MAX_EXPANDED_TARGETS:
+                    raise ValueError(f"{t!r}: range too large")
+                # Validate every generated candidate as a real IP rather than
+                # trusting string interpolation -- see docstring. Built as a
+                # plain list (not extend(generator)) so a late failure (e.g.
+                # base="1.2.3" with hi=300 -> "1.2.3.256" invalid) can't
+                # leave the earlier, individually-valid addresses from this
+                # same malformed entry already appended to `ips` before the
+                # ValueError is raised -- the whole entry is atomic: all or
+                # none.
+                candidates = [str(ipaddress.ip_address(f"{base}.{i}")) for i in range(lo, hi + 1)]
+                ips.extend(candidates)
             else:
                 ips.append(str(ipaddress.ip_address(t)))
-        except ValueError:
+        except ValueError as exc:
             if strict:
                 raise ValueError(
                     f"exclude entry {t!r} isn't a plain IP, CIDR, or "
                     "a.b.c.d-e range -- refusing to scan rather than silently "
                     "failing to exclude it"
                 ) from None
-            print(f"[warn] skipping unparseable target {t!r}", file=sys.stderr)
+            print(f"[warn] skipping unparseable target {t!r} ({exc})", file=sys.stderr)
+    if len(ips) > _MAX_EXPANDED_TARGETS:
+        raise ValueError(
+            f"targets expand to {len(ips)} addresses, over the "
+            f"{_MAX_EXPANDED_TARGETS}-address sanity cap -- narrow targets/exclude"
+        )
     return ips
 
 

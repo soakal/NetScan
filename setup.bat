@@ -14,15 +14,26 @@ REM Safe to re-run any time. Never installs anything without asking first
 REM (unless -y/--yes is passed). See setup.sh for the Linux/macOS equivalent.
 
 REM Bump NMAP_TARGET after checking https://nmap.org/dist/ for the current
-REM version -- anything >= 7.90 fixes nmap/nmap#1764. If you bump it, also
-REM re-verify NMAP_SIGNER_MATCH still matches the new installer's
+REM version -- anything >= 7.90 fixes nmap/nmap#1764. If you bump it, ALSO
+REM update NMAP_SHA256 (get it from https://nmap.org/dist/sigs/nmap-<ver>-setup.exe.digest
+REM or `Get-FileHash -Algorithm SHA256` on a copy you've verified another
+REM way) and re-verify NMAP_SIGNER_MATCH still matches the new installer's
 REM Get-AuthenticodeSignature signer subject (it was "Nmap Software LLC" as
 REM of nmap 7.99 -- older releases were signed as "Insecure.Com LLC", so a
 REM version jump could change this).
+REM
+REM Both checks matter: Authenticode alone trusts *any* validly-chained cert
+REM whose subject contains "Nmap Software" (in principle a same-name cert
+REM from a different, confusable entity), and by itself doesn't stop an
+REM attacker who can win the download path from serving an OLDER genuine
+REM signed installer (a downgrade back to a buggy version). Pinning the
+REM exact expected hash of THIS version closes both gaps and makes the
+REM download tamper-evident even against a compromised nmap.org.
 set "NMAP_TARGET=7.99"
 set "NMAP_MIN_MAJOR=7"
 set "NMAP_MIN_MINOR=90"
 set "NMAP_SIGNER_MATCH=Nmap Software"
+set "NMAP_SHA256=FDA839F35D9F8F18A11670E17D0332CE9D05A3556C5A20E91B0B56C57774F611"
 
 REM Resolved once, at top level: expanding %ProgramFiles(x86)% *inside* an
 REM if-block truncates at the ')' in the variable name and silently breaks.
@@ -229,11 +240,30 @@ exit /b 0
 
 REM ===========================================================================
 :offer_nmap_install
+REM Npcap's free edition has no silent installer -- if it's not already
+REM present, nmap's own installer pops a message box and quits when given
+REM /S (confirmed against nmap's NSIS installer source). Checked up front
+REM (rather than after download+verify) so the "a window will pop up" heads
+REM -up is part of the single confirmation prompt, and so there's no idle
+REM gap -- previously an interactive-install "press a key when ready" pause
+REM sat AFTER the installer was already downloaded and verified, needlessly
+REM widening the window in which something else with write access to
+REM %TEMP% could swap the file before it runs.
+set "NPCAP_FOUND=0"
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" /v DisplayVersion >nul 2>&1 && set "NPCAP_FOUND=1"
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" /v DisplayVersion >nul 2>&1 && set "NPCAP_FOUND=1"
+
 echo.
 echo This will download and install nmap %NMAP_TARGET% from nmap.org:
 echo   1. Download https://nmap.org/dist/nmap-%NMAP_TARGET%-setup.exe (~35 MB^) to %%TEMP%%
-echo   2. Verify its Authenticode (digital^) signature before running it
+echo   2. Verify its SHA-256 hash and Authenticode (digital^) signature
 echo   3. Run the installer (a Windows admin/UAC prompt will appear^)
+if "!NPCAP_FOUND!"=="0" (
+    echo   Npcap ^(the packet-capture driver nmap needs^) isn't installed yet.
+    echo   Its free edition has no silent installer, so after the checks above
+    echo   the nmap setup window will open for you to click through --
+    echo   accept the license pages and keep the defaults.
+)
 echo.
 if "!ASSUME_YES!"=="1" (
     set "NMAP_CONFIRM=y"
@@ -255,7 +285,21 @@ echo Downloading nmap %NMAP_TARGET%...
 if errorlevel 1 (
     echo Download failed. Check https://nmap.org/dist/ for the current
     echo version and update NMAP_TARGET at the top of setup.bat if it changed.
+    del "!NMAP_INSTALLER!" >nul 2>&1
     set "STATUS_NMAP=failed (download)"
+    exit /b 1
+)
+
+echo Verifying installer hash...
+set "HASH_FILE=!NMAP_INSTALLER!"
+set "HASH_EXPECT=%NMAP_SHA256%"
+"!PWSH_EXE!" -NoProfile -ExecutionPolicy Bypass -Command "$h = (Get-FileHash -Algorithm SHA256 -Path $env:HASH_FILE).Hash; Write-Host ('  SHA-256 (got)      : ' + $h); Write-Host ('  SHA-256 (expected)  : ' + $env:HASH_EXPECT); if ($h -ne $env:HASH_EXPECT) { exit 1 }"
+if errorlevel 1 (
+    echo Hash verification FAILED -- refusing to run this installer. If you
+    echo intentionally bumped NMAP_TARGET without updating NMAP_SHA256 in
+    echo setup.bat, that's why -- see the comment above NMAP_TARGET.
+    del "!NMAP_INSTALLER!" >nul 2>&1
+    set "STATUS_NMAP=failed (hash)"
     exit /b 1
 )
 
@@ -271,23 +315,13 @@ if errorlevel 1 (
 )
 "!PWSH_EXE!" -NoProfile -Command "Unblock-File -Path $env:SIG_FILE" >nul 2>&1
 
-REM Npcap's free edition has no silent installer -- if it's not already
-REM present, nmap's own installer pops a message box and quits when given
-REM /S (confirmed against nmap's NSIS installer source). In that case run
-REM interactively instead.
-set "NPCAP_FOUND=0"
-reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" /v DisplayVersion >nul 2>&1 && set "NPCAP_FOUND=1"
-reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\NpcapInst" /v DisplayVersion >nul 2>&1 && set "NPCAP_FOUND=1"
-
 set "RUN_FILE=!NMAP_INSTALLER!"
 if "!NPCAP_FOUND!"=="1" (
     echo Installing silently...
     "!PWSH_EXE!" -NoProfile -Command "try { $p = Start-Process -FilePath $env:RUN_FILE -ArgumentList '/S','/NPCAP=NO' -Verb RunAs -Wait -PassThru; exit $p.ExitCode } catch { exit 999 }"
 ) else (
-    echo Npcap (the packet-capture driver nmap needs^) isn't installed yet.
-    echo Its free edition has no silent installer, so the nmap setup window
-    echo will open -- accept the license pages and keep the defaults.
-    pause
+    echo Opening the nmap setup window -- accept the license pages and keep
+    echo the defaults.
     "!PWSH_EXE!" -NoProfile -Command "try { $p = Start-Process -FilePath $env:RUN_FILE -Verb RunAs -Wait -PassThru; exit $p.ExitCode } catch { exit 999 }"
 )
 set "NMAP_INSTALL_RC=!errorlevel!"

@@ -1,7 +1,10 @@
 # ---- NetScan configuration --------------------------------------------------
 # Copy to config.yaml and edit. Only `targets` is strictly required.
 
-# Networks / hosts to scan. CIDR, ranges, or single IPs.
+# Networks / hosts to scan. CIDR, ranges, or single IPs (hostnames aren't
+# supported here). A single entry/config expanding past 65536 addresses is
+# rejected as a sanity cap (catches typos like an accidental /0 or /8) --
+# narrow it if you hit that.
 targets:
   - 192.168.1.0/24
   # - 10.0.0.10-50
