@@ -75,6 +75,119 @@ def cpe22_to_23(cpe: str) -> str:
 # nmap path
 # ---------------------------------------------------------------------------
 
+def _nmap_upgrade_hint() -> str:
+    if sys.platform == "win32":
+        return "winget upgrade Insecure.Nmap"
+    if sys.platform == "darwin":
+        return "brew upgrade nmap"
+    return "your distro's package manager (apt/dnf/pacman/etc.)"
+
+
+def _warn_if_buggy_nmap(scanner: "nmap.PortScanner") -> None:
+    """nmap 7.80 has a known crash bug (nmap/nmap#1764): a stray ARP reply
+    arriving after --host-timeout stops a target's clock hits an internal
+    assertion ("Assertion failed: htn.toclock_running == true, Target.cc")
+    and aborts the whole scan. It's most likely on large target lists.
+    Fixed upstream in 7.90. We can't fix nmap's own bug, just warn and
+    (in _scan_with_nmap) retry with the known workaround if it happens."""
+    version = scanner.nmap_version()
+    if version and version != (0, 0) and version < (7, 90):
+        print(f"[warn] nmap {version[0]}.{version[1]} detected -- versions before "
+              "7.90 have a known crash bug on large scans (nmap/nmap#1764). "
+              "If the scan aborts with 'Assertion failed: htn.toclock_running', "
+              f"upgrade nmap: {_nmap_upgrade_hint()}",
+              file=sys.stderr)
+
+
+# nmap 7.80's crash bug (nmap/nmap#1764) shows up on target lists roughly
+# above ~100 hosts and isn't reliably avoided by --max-parallelism alone (we
+# saw it recur with that flag on a 766-host scan). Splitting the run into
+# small per-invocation chunks keeps each nmap process well under the
+# threshold, and confines a crash to the one chunk that triggered it instead
+# of losing the whole scan's results.
+_NMAP_CHUNK_SIZE = 48
+
+
+def _parse_nmap_host(scanner: "nmap.PortScanner", ip: str) -> dict[str, Any] | None:
+    h = scanner[ip]
+    if h.state() != "up":
+        return None
+
+    mac = h["addresses"].get("mac")
+    vendor = None
+    if mac and h.get("vendor"):
+        vendor = h["vendor"].get(mac)
+
+    os_name, os_acc, device_type = None, None, None
+    osmatches = h.get("osmatch") or []
+    if osmatches:
+        os_name = osmatches[0].get("name")
+        os_acc = int(osmatches[0].get("accuracy") or 0)
+        classes = osmatches[0].get("osclass") or []
+        if classes:
+            device_type = classes[0].get("type")
+
+    hostname = None
+    names = h.get("hostnames") or []
+    if names and names[0].get("name"):
+        hostname = names[0]["name"]
+
+    host_key = mac or ip
+    services: list[dict[str, Any]] = []
+    for proto in ("tcp", "udp"):
+        for port in sorted(h.all_protocols() and h[proto].keys() if proto in h else []):
+            p = h[proto][port]
+            if p.get("state") not in ("open", "open|filtered"):
+                continue
+            cpe_field = p.get("cpe") or ""
+            cpes = [cpe22_to_23(c) for c in re.split(r"[\s,]+", cpe_field) if c]
+            services.append({
+                "port": int(port),
+                "proto": proto,
+                "state": p.get("state"),
+                "service": p.get("name"),
+                "product": p.get("product") or None,
+                "version": p.get("version") or None,
+                "extrainfo": p.get("extrainfo") or None,
+                "cpe": cpes[0] if cpes else None,
+                "cpes": cpes,
+            })
+
+    return {
+        "ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
+        "os_name": os_name, "os_accuracy": os_acc, "device_type": device_type,
+        "host_key": host_key, "services": services,
+    }
+
+
+def _scan_chunk(scanner: "nmap.PortScanner", chunk_targets: str, extra: str,
+                 label: str) -> list[str]:
+    """Run one nmap invocation over a chunk of targets. On the known nmap
+    7.80 assertion crash, retry once with --max-parallelism 10; if it crashes
+    again, skip the chunk (log + return no hosts) rather than aborting the
+    whole scan. Any other PortScannerError propagates."""
+    try:
+        scanner.scan(hosts=chunk_targets, arguments=extra)
+        return scanner.all_hosts()
+    except nmap.PortScannerError as exc:
+        if "Assertion failed" not in str(exc):
+            raise
+        if "--max-parallelism" not in extra:
+            print(f"[warn] nmap crashed on {label} ({exc}); retrying with "
+                  "--max-parallelism 10 (known workaround for nmap/nmap#1764)",
+                  file=sys.stderr)
+            try:
+                scanner.scan(hosts=chunk_targets, arguments=extra + " --max-parallelism 10")
+                return scanner.all_hosts()
+            except nmap.PortScannerError as exc2:
+                exc = exc2
+        print(f"[warn] {label} crashed nmap twice ({exc}); skipping this "
+              "chunk. This is a known nmap 7.80 bug (nmap/nmap#1764) fixed "
+              f"in nmap 7.90+ -- upgrade to resolve it permanently: "
+              f"{_nmap_upgrade_hint()}", file=sys.stderr)
+        return []
+
+
 def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
     scanner = nmap.PortScanner()
     profile = cfg.profile
@@ -88,65 +201,31 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
                   "requires euid 0 for -O; setcap capabilities are not "
                   "sufficient.)", file=sys.stderr)
 
-    targets = " ".join(cfg.targets)
     extra = args
+    ips = _expand_targets(cfg.targets)
     if cfg.exclude:
-        extra += " --exclude " + ",".join(cfg.exclude)
+        # strict=True: an exclude entry we can't parse must not silently
+        # fail to exclude that host -- it exists to protect fragile devices,
+        # so failing open (scanning it anyway) is the wrong default.
+        excluded = set(_expand_targets(cfg.exclude, strict=True))
+        ips = [ip for ip in ips if ip not in excluded]
+    # Overlapping target specs (e.g. a CIDR plus one of its own IPs) can
+    # repeat an address; dedupe so it isn't scanned -- and inserted into the
+    # DB -- twice under an identical host_key.
+    ips = list(dict.fromkeys(ips))
 
-    print(f"[nmap] scanning {targets}\n[nmap] args: {extra}", file=sys.stderr)
-    scanner.scan(hosts=targets, arguments=extra)
+    chunks = [ips[i:i + _NMAP_CHUNK_SIZE] for i in range(0, len(ips), _NMAP_CHUNK_SIZE)]
+    print(f"[nmap] scanning {len(ips)} addresses in {len(chunks)} chunk(s) of "
+          f"up to {_NMAP_CHUNK_SIZE}\n[nmap] args: {extra}", file=sys.stderr)
+    _warn_if_buggy_nmap(scanner)
 
     hosts: list[dict[str, Any]] = []
-    for ip in scanner.all_hosts():
-        h = scanner[ip]
-        if h.state() != "up":
-            continue
-
-        mac = h["addresses"].get("mac")
-        vendor = None
-        if mac and h.get("vendor"):
-            vendor = h["vendor"].get(mac)
-
-        os_name, os_acc, device_type = None, None, None
-        osmatches = h.get("osmatch") or []
-        if osmatches:
-            os_name = osmatches[0].get("name")
-            os_acc = int(osmatches[0].get("accuracy") or 0)
-            classes = osmatches[0].get("osclass") or []
-            if classes:
-                device_type = classes[0].get("type")
-
-        hostname = None
-        names = h.get("hostnames") or []
-        if names and names[0].get("name"):
-            hostname = names[0]["name"]
-
-        host_key = mac or ip
-        services: list[dict[str, Any]] = []
-        for proto in ("tcp", "udp"):
-            for port in sorted(h.all_protocols() and h[proto].keys() if proto in h else []):
-                p = h[proto][port]
-                if p.get("state") not in ("open", "open|filtered"):
-                    continue
-                cpe_field = p.get("cpe") or ""
-                cpes = [cpe22_to_23(c) for c in re.split(r"[\s,]+", cpe_field) if c]
-                services.append({
-                    "port": int(port),
-                    "proto": proto,
-                    "state": p.get("state"),
-                    "service": p.get("name"),
-                    "product": p.get("product") or None,
-                    "version": p.get("version") or None,
-                    "extrainfo": p.get("extrainfo") or None,
-                    "cpe": cpes[0] if cpes else None,
-                    "cpes": cpes,
-                })
-
-        hosts.append({
-            "ip": ip, "mac": mac, "vendor": vendor, "hostname": hostname,
-            "os_name": os_name, "os_accuracy": os_acc, "device_type": device_type,
-            "host_key": host_key, "services": services,
-        })
+    for i, chunk in enumerate(chunks, start=1):
+        label = f"chunk {i}/{len(chunks)} ({chunk[0]}-{chunk[-1]})"
+        for ip in _scan_chunk(scanner, " ".join(chunk), extra, label):
+            parsed = _parse_nmap_host(scanner, ip)
+            if parsed:
+                hosts.append(parsed)
 
     # Two different IPs can legitimately report the same MAC (cloned VM
     # templates, some virtual-switch/NAT setups) or illegitimately (ARP
@@ -173,7 +252,14 @@ def _scan_with_nmap(cfg: Config) -> list[dict[str, Any]]:
 # Pure-Python fallback path
 # ---------------------------------------------------------------------------
 
-def _expand_targets(targets: list[str]) -> list[str]:
+def _expand_targets(targets: list[str], strict: bool = False) -> list[str]:
+    """Expand CIDR/`a.b.c.d-e`/plain-IP target specs into individual IPs.
+    Hostnames and anything else nmap's own target grammar understands are
+    NOT supported here -- by default such entries are skipped with a warning
+    (matches nmap's own resolve-it-for-me behavior closely enough for stats
+    purposes). Pass strict=True to raise instead: used for `exclude`, where
+    silently failing to honor an entry means scanning a host the caller
+    explicitly asked to skip -- fail closed, not open."""
     ips: list[str] = []
     for t in targets:
         t = t.strip()
@@ -189,6 +275,12 @@ def _expand_targets(targets: list[str]) -> list[str]:
             else:
                 ips.append(str(ipaddress.ip_address(t)))
         except ValueError:
+            if strict:
+                raise ValueError(
+                    f"exclude entry {t!r} isn't a plain IP, CIDR, or "
+                    "a.b.c.d-e range -- refusing to scan rather than silently "
+                    "failing to exclude it"
+                ) from None
             print(f"[warn] skipping unparseable target {t!r}", file=sys.stderr)
     return ips
 
