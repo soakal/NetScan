@@ -3,7 +3,6 @@
 
 # Networks / hosts to scan. CIDR, ranges, or single IPs.
 targets:
-  - 10.10.10.0/23      # Ethernet (10.10.11.50/23)
   - 192.168.200.0/24   # Ethernet 2 (192.168.200.65/24)
 
 # Addresses to skip (e.g. fragile devices, the scanner host itself).
@@ -15,7 +14,7 @@ exclude:
 #             trip IDS/EDR — detection only, never exploitation)
 #   standard  top-1000 ports + light OS detection
 #   thorough  all ports + full version + OS detection (noisy; use a window)
-scan_profile: light
+scan_profile: standard
 
 # --- Threat-intel data sources ---
 # NVD CVE API key (optional but recommended; raises rate limit 10x).

@@ -1,0 +1,84 @@
+# ---- NetScan configuration --------------------------------------------------
+# Copy to config.yaml and edit. Only `targets` is strictly required.
+
+# Networks / hosts to scan. CIDR, ranges, or single IPs.
+targets:
+  - 10.10.10.0/23      # Ethernet (10.10.11.50/23)
+  - 192.168.200.0/24   # Ethernet 2 (192.168.200.65/24)
+
+# Addresses to skip (e.g. fragile devices, the scanner host itself).
+exclude:
+  # - 192.168.1.254
+
+# Scan aggressiveness / noise level. Run `python run.py profiles` to list.
+#   light     quiet, top-100 ports, polite timing  (default, least likely to
+#             trip IDS/EDR — detection only, never exploitation)
+#   standard  top-1000 ports + light OS detection
+#   thorough  all ports + full version + OS detection (noisy; use a window)
+scan_profile: standard
+
+# --- Threat-intel data sources ---
+# NVD CVE API key (optional but recommended; raises rate limit 10x).
+# Get a free key: https://nvd.nist.gov/developers/request-an-api-key
+# Can also be set via env var NETSCAN_NVD_API_KEY.
+nvd_api_key: ecabdaf0-613e-4a49-848a-2ed676c228ad
+
+# VirusTotal API key (optional). Enables IP-reputation enrichment.
+# Env var: NETSCAN_VT_API_KEY
+vt_api_key: null
+vt_check_host_ips: false   # set true to look up each live host IP on VirusTotal
+
+# KEV (CISA) and EPSS (FIRST.org) need no key.
+
+# --- Credentialed (authenticated) scanning ---
+# Log into hosts you OWN with a least-privilege account and read an accurate
+# software/patch inventory. This is the quietest and most accurate scan mode:
+# it's a normal management login running read-only queries (no exploitation,
+# no changes to the target). Requires paramiko (SSH) and/or pywinrm (WinRM):
+#   pip install paramiko pywinrm
+#
+# SECURITY: prefer SSH keys or `password_env` over inline passwords, and keep
+# this file out of version control (chmod 600). Use a dedicated read-only
+# service account, not a domain admin.
+credentialed: false
+credentials:
+  # - name: linux-fleet
+  #   type: ssh
+  #   username: scansvc
+  #   key_file: ~/.ssh/scan_ed25519     # or use password_env below
+  #   password_env: NETSCAN_SSH_PASS    # reads the password from this env var
+  #   port: 22
+  #   match: ["192.168.1.0/24"]         # which hosts this cred applies to
+  #
+  # - name: windows-fleet
+  #   type: winrm
+  #   username: 'SCANDOMAIN\svc-scan'
+  #   password_env: NETSCAN_WINRM_PASS
+  #   scheme: https                     # https=5986 (recommended), http=5985
+  #   match: ["192.168.10.0/24"]
+  #
+  # An empty `match: []` (or omitting it) applies the credential to every host
+  # of that type. The first matching credential wins; SSH is tried for *nix
+  # fingerprints and WinRM for Windows when both could match.
+
+# --- Accurate credentialed matching backends ---
+# OVAL: use distro security feeds (Ubuntu/Debian/RHEL family) to assess Linux
+#       packages with backport awareness — compares the installed version to the
+#       distro's *fixed* version, eliminating the false positives you get from
+#       generic version/CPE matching. No key needed.
+oval_matching: true
+# MSRC: use Microsoft's CVE->KB data to turn a Windows host's installed-hotfix
+#       list into "missing patch" findings, with cumulative-update supersedence.
+msrc_matching: true
+msrc_months: 3            # how many recent patch-Tuesday months to pull/correlate
+msrc_api_key: null        # optional; env var NETSCAN_MSRC_API_KEY
+
+# --- Storage / cache ---
+db_path: netscan.db
+cache_dir: .netscan_cache
+kev_cache_hours: 24
+nvd_cache_hours: 168
+
+# --- Web report ---
+web_host: 127.0.0.1   # keep on localhost unless you intend to expose it
+web_port: 8000
