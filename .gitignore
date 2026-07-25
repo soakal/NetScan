@@ -5,6 +5,7 @@ config.*.yaml
 
 # Runtime data
 netscan.db
+demo.db
 .netscan_cache/
 
 # Python
